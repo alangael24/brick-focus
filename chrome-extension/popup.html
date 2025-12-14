@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Brick Focus</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+    }
+
+    .container {
+      padding: 20px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .logo {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .status {
+      text-align: center;
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      transition: all 0.3s ease;
+    }
+
+    .status.inactive {
+      background: linear-gradient(135deg, #2d2d44 0%, #1a1a2e 100%);
+      border: 2px solid #3d3d5c;
+    }
+
+    .status.active {
+      background: linear-gradient(135deg, #1e5128 0%, #0d2818 100%);
+      border: 2px solid #4CAF50;
+    }
+
+    .status-text {
+      font-size: 14px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+
+    .status-label {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .status.active .status-label {
+      color: #4CAF50;
+    }
+
+    .status.inactive .status-label {
+      color: #888;
+    }
+
+    .toggle-btn {
+      width: 100%;
+      padding: 14px 20px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-bottom: 20px;
+    }
+
+    .toggle-btn.activate {
+      background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);
+      color: white;
+    }
+
+    .toggle-btn.deactivate {
+      background: linear-gradient(135deg, #e53935 0%, #c62828 100%);
+      color: white;
+    }
+
+    .toggle-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .section-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #666;
+      margin-bottom: 10px;
+    }
+
+    .sites-list {
+      background: #2d2d44;
+      border-radius: 10px;
+      padding: 12px;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+
+    .site-item {
+      display: flex;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #3d3d5c;
+    }
+
+    .site-item:last-child {
+      border-bottom: none;
+    }
+
+    .site-icon {
+      width: 20px;
+      height: 20px;
+      background: #4a4a6a;
+      border-radius: 4px;
+      margin-right: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .site-name {
+      flex: 1;
+      font-size: 14px;
+    }
+
+    .connection-status {
+      text-align: center;
+      padding: 10px;
+      font-size: 11px;
+      color: #666;
+      margin-top: 15px;
+    }
+
+    .connection-status.connected {
+      color: #4CAF50;
+    }
+
+    .connection-status::before {
+      content: '';
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      background: #666;
+    }
+
+    .connection-status.connected::before {
+      background: #4CAF50;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">🧱</div>
+      <div class="title">Brick Focus</div>
+    </div>
+
+    <div class="status inactive" id="status">
+      <div class="status-text">Modo Focus</div>
+      <div class="status-label" id="statusLabel">INACTIVO</div>
+      <div class="timer" id="timer" style="display:none; font-size:32px; font-weight:bold; color:#4CAF50; margin-top:10px; font-variant-numeric:tabular-nums;">00:00:00</div>
+    </div>
+
+    <button class="toggle-btn activate" id="toggleBtn">
+      Activar Focus Mode
+    </button>
+
+    <div class="section-title">Sitios bloqueados</div>
+    <div class="sites-list" id="sitesList">
+      <!-- Se llena dinámicamente -->
+    </div>
+
+    <div class="connection-status" id="connectionStatus">
+      Sin conexión al servidor
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

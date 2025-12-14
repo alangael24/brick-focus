@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sitio Bloqueado - Brick Focus</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #fff;
+    }
+
+    .container {
+      text-align: center;
+      padding: 40px;
+      max-width: 500px;
+    }
+
+    .brick {
+      font-size: 80px;
+      margin-bottom: 20px;
+      animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    h1 {
+      font-size: 32px;
+      margin-bottom: 16px;
+      background: linear-gradient(135deg, #4CAF50, #8BC34A);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .message {
+      font-size: 18px;
+      color: #aaa;
+      line-height: 1.6;
+      margin-bottom: 30px;
+    }
+
+    .focus-text {
+      font-size: 14px;
+      color: #666;
+      padding: 20px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      margin-bottom: 30px;
+    }
+
+    .quote {
+      font-style: italic;
+      color: #888;
+      margin-bottom: 10px;
+    }
+
+    .author {
+      color: #666;
+      font-size: 12px;
+    }
+
+    .timer {
+      font-size: 48px;
+      font-weight: 700;
+      color: #4CAF50;
+      margin-bottom: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .timer-label {
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    .back-btn {
+      display: inline-block;
+      margin-top: 30px;
+      padding: 12px 24px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      color: #888;
+      text-decoration: none;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .back-btn:hover {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="brick">🧱</div>
+    <h1>Focus Mode Activo</h1>
+    <p class="message">
+      Este sitio está bloqueado mientras estás en modo focus.<br>
+      Respira y vuelve a lo que importa.
+    </p>
+
+    <div class="focus-text">
+      <p class="quote">"La concentración es la raíz de todas las capacidades superiores."</p>
+      <p class="author">- Bruce Lee</p>
+    </div>
+
+    <div class="timer" id="timer">00:00:00</div>
+    <div class="timer-label">Tiempo en focus</div>
+
+    <a href="#" class="back-btn" id="backBtn">← Volver atrás</a>
+  </div>
+
+  <script src="blocked.js"></script>
+</body>
+</html>

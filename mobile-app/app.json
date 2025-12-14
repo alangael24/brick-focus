@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Brick Focus",
+    "slug": "brick-focus",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#1a1a2e"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.brickfocus.app",
+      "infoPlist": {
+        "NFCReaderUsageDescription": "Brick Focus usa NFC para activar el modo focus",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1a1a2e"
+      },
+      "package": "com.brickfocus.app",
+      "permissions": [
+        "android.permission.NFC"
+      ]
+    },
+    "plugins": [
+      [
+        "react-native-nfc-manager",
+        {
+          "nfcPermission": "Brick Focus necesita acceso a NFC para leer tu tag",
+          "selectIdentifiers": [],
+          "systemCodes": []
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e696a939-c528-4abc-98c6-9825693c90e8"
+      }
+    }
+  }
+}

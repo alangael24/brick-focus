@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Brick Focus",
+  "version": "1.0.0",
+  "description": "Bloquea sitios distractores cuando el modo focus está activo",
+  "permissions": [
+    "storage",
+    "tabs",
+    "webNavigation",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Brick Focus"
+  },
+  "declarative_net_request": {
+    "rule_resources": [{
+      "id": "block_rules",
+      "enabled": false,
+      "path": "rules.json"
+    }]
+  }
+}

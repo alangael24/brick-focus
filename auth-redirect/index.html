@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Brick Focus - Autenticación</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      text-align: center;
+      max-width: 400px;
+    }
+    .logo {
+      font-size: 80px;
+      margin-bottom: 20px;
+    }
+    .title {
+      font-size: 28px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    .message {
+      font-size: 18px;
+      color: #888;
+      margin-bottom: 30px;
+    }
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid #333;
+      border-top-color: #4CAF50;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 30px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .button {
+      display: inline-block;
+      background: #4CAF50;
+      color: white;
+      padding: 15px 30px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .button:hover {
+      background: #43A047;
+    }
+    .error {
+      color: #e53935;
+    }
+    .hint {
+      margin-top: 20px;
+      font-size: 14px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">🧱</div>
+    <h1 class="title">Brick Focus</h1>
+    <div id="content">
+      <div class="spinner"></div>
+      <p class="message">Abriendo la app...</p>
+    </div>
+  </div>
+
+  <script>
+    // Obtener los tokens del hash de la URL
+    const hash = window.location.hash.substring(1);
+    const params = new URLSearchParams(hash);
+
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
+    const error = params.get('error');
+    const errorDescription = params.get('error_description');
+
+    const content = document.getElementById('content');
+
+    if (error) {
+      // Mostrar error
+      content.innerHTML = `
+        <p class="message error">Error: ${errorDescription || error}</p>
+        <p class="hint">Intenta iniciar sesión de nuevo desde la app.</p>
+      `;
+    } else if (accessToken && refreshToken) {
+      // Construir el deep link con los tokens
+      const deepLink = `brickfocus://auth#access_token=${accessToken}&refresh_token=${refreshToken}&type=magiclink`;
+
+      // Intentar abrir la app
+      window.location.href = deepLink;
+
+      // Si después de 2 segundos seguimos aquí, mostrar botón manual
+      setTimeout(() => {
+        content.innerHTML = `
+          <p class="message">¿No se abrió la app?</p>
+          <a href="${deepLink}" class="button">Abrir Brick Focus</a>
+          <p class="hint">Si no tienes la app instalada, descárgala primero.</p>
+        `;
+      }, 2000);
+    } else {
+      // No hay tokens
+      content.innerHTML = `
+        <p class="message error">Link inválido o expirado</p>
+        <p class="hint">Solicita un nuevo link desde la app.</p>
+      `;
+    }
+  </script>
+</body>
+</html>

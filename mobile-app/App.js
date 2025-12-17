@@ -8,22 +8,150 @@ import {
   Animated,
   Vibration,
   Platform,
+  ScrollView,
+  TextInput,
+  KeyboardAvoidingView,
+  Modal,
+  ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { supabase } from './src/lib/supabase';
 import { brickStatusService } from './src/services/brickStatus';
-import NfcManager, { NfcTech, NfcEvents } from 'react-native-nfc-manager';
+import { blockedSitesService } from './src/services/blockedSites';
+import { analyticsService } from './src/services/analytics';
+import { linkCodesService } from './src/services/linkCodes';
+import { screenTimeService, isScreenTimeAvailable } from './src/services/screenTime';
+import AuthScreen from './src/screens/AuthScreen';
+import AppBlockerScreen from './src/screens/AppBlockerScreen';
+import NfcManager, { NfcTech } from 'react-native-nfc-manager';
 
 export default function App() {
+  const [session, setSession] = useState(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+
+  // Manejar deep link de autenticación
+  const handleDeepLink = async (url) => {
+    if (!url) return;
+
+    console.log('Deep link received:', url);
+
+    // Extraer tokens del URL
+    // El formato es: brickfocus://auth#access_token=...&refresh_token=...
+    if (url.includes('access_token') || url.includes('#')) {
+      try {
+        // Parsear el fragmento
+        const hashIndex = url.indexOf('#');
+        if (hashIndex !== -1) {
+          const fragment = url.substring(hashIndex + 1);
+          const params = new URLSearchParams(fragment);
+
+          const accessToken = params.get('access_token');
+          const refreshToken = params.get('refresh_token');
+
+          if (accessToken && refreshToken) {
+            console.log('Setting session from deep link...');
+            const { data, error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+
+            if (error) {
+              console.log('Error setting session:', error);
+              Alert.alert('Error', 'No se pudo iniciar sesión');
+            } else {
+              console.log('Session set successfully');
+            }
+          }
+        }
+      } catch (error) {
+        console.log('Error parsing deep link:', error);
+      }
+    }
+  };
+
+  // Manejar autenticación
+  useEffect(() => {
+    // Obtener sesión actual
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoadingAuth(false);
+    });
+
+    // Escuchar cambios de auth
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    // Manejar URL inicial (si la app se abrió desde un link)
+    Linking.getInitialURL().then((url) => {
+      if (url) handleDeepLink(url);
+    });
+
+    // Escuchar nuevos deep links mientras la app está abierta
+    const linkingListener = Linking.addEventListener('url', (event) => {
+      handleDeepLink(event.url);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      if (linkingListener) linkingListener.remove();
+    };
+  }, []);
+
+  // Mostrar loading mientras verifica auth
+  if (loadingAuth) {
+    return (
+      <View style={styles.loadingContainer}>
+        <StatusBar style="light" />
+        <Text style={styles.logo}>🧱</Text>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
+
+  // Si no hay sesión, mostrar login
+  if (!session) {
+    return <AuthScreen />;
+  }
+
+  // Si hay sesión, mostrar la app principal
+  return <MainApp session={session} />;
+}
+
+function MainApp({ session }) {
   const [isLocked, setIsLocked] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
   const [nfcEnabled, setNfcEnabled] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [connected, setConnected] = useState(false);
   const [focusTime, setFocusTime] = useState(0);
+  const [blockedSites, setBlockedSites] = useState([]);
+  const [newSite, setNewSite] = useState('');
+  const [showSites, setShowSites] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [stats, setStats] = useState(null);
+  const [showDurationPicker, setShowDurationPicker] = useState(false);
+  const [selectedDuration, setSelectedDuration] = useState(null); // null = sin límite
+  const [timerEndTime, setTimerEndTime] = useState(null);
+  const [customMinutes, setCustomMinutes] = useState('');
+  const [showAppBlocker, setShowAppBlocker] = useState(false);
+  const [screenTimeEnabled, setScreenTimeEnabled] = useState(false);
+  const [showLinkCode, setShowLinkCode] = useState(false);
+  const [linkCode, setLinkCode] = useState(null);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const focusStartTime = useRef(null);
   const subscriptionRef = useRef(null);
+  const sitesSubscriptionRef = useRef(null);
+
+  // Presets de duración (en segundos)
+  const DURATION_PRESETS = [
+    { label: '25 min', seconds: 25 * 60, emoji: '🍅' },
+    { label: '45 min', seconds: 45 * 60, emoji: '📚' },
+    { label: '1 hora', seconds: 60 * 60, emoji: '💪' },
+    { label: '2 horas', seconds: 120 * 60, emoji: '🚀' },
+  ];
 
   // Inicializar NFC y Supabase Realtime
   useEffect(() => {
@@ -52,10 +180,16 @@ export default function App() {
         setIsLocked(status.is_locked);
         if (status.is_locked && status.last_updated) {
           focusStartTime.current = new Date(status.last_updated).getTime();
+          // Cargar timer si existe
+          if (status.timer_end_at) {
+            setTimerEndTime(new Date(status.timer_end_at).getTime());
+            setSelectedDuration(status.timer_duration_seconds);
+          }
         }
         setConnected(true);
 
         // Suscribirse a cambios en tiempo real
+        const userId = session.user.id;
         subscriptionRef.current = brickStatusService.subscribeToChanges((newStatus) => {
           console.log('Realtime:', newStatus.is_locked ? 'LOCKED' : 'UNLOCKED');
           setIsLocked(newStatus.is_locked);
@@ -65,11 +199,41 @@ export default function App() {
             // Usar timestamp de Supabase para sincronizar
             focusStartTime.current = new Date(newStatus.last_updated).getTime();
             setFocusTime(Date.now() - focusStartTime.current);
+            // Sincronizar timer
+            if (newStatus.timer_end_at) {
+              setTimerEndTime(new Date(newStatus.timer_end_at).getTime());
+              setSelectedDuration(newStatus.timer_duration_seconds);
+            } else {
+              setTimerEndTime(null);
+              setSelectedDuration(null);
+            }
           } else {
             focusStartTime.current = null;
             setFocusTime(0);
+            setTimerEndTime(null);
+            setSelectedDuration(null);
           }
-        });
+        }, userId);
+
+        // Cargar sitios bloqueados
+        const sites = await blockedSitesService.getSites();
+        setBlockedSites(sites);
+
+        // Cargar estadísticas
+        const allStats = await analyticsService.getAllStats();
+        setStats(allStats);
+
+        // Suscribirse a cambios de sitios
+        sitesSubscriptionRef.current = blockedSitesService.subscribeToChanges(() => {
+          // Recargar lista cuando hay cambios
+          blockedSitesService.getSites().then(setBlockedSites);
+        }, userId);
+
+        // Inicializar Screen Time (solo iOS)
+        if (isScreenTimeAvailable()) {
+          const authStatus = await screenTimeService.getAuthorizationStatus();
+          setScreenTimeEnabled(authStatus === 'approved' || authStatus === 'authorized');
+        }
       } catch (error) {
         console.log('Error conectando a Supabase:', error);
         setConnected(false);
@@ -80,12 +244,13 @@ export default function App() {
 
     return () => {
       // Limpiar NFC
-      NfcManager.setEventListener(NfcEvents.DiscoverTag, null);
-      NfcManager.unregisterTagEvent().catch(() => {});
       NfcManager.cancelTechnologyRequest().catch(() => {});
       // Limpiar Supabase
       if (subscriptionRef.current) {
         brickStatusService.unsubscribe(subscriptionRef.current);
+      }
+      if (sitesSubscriptionRef.current) {
+        blockedSitesService.unsubscribe(sitesSubscriptionRef.current);
       }
     };
   }, []);
@@ -100,7 +265,17 @@ export default function App() {
     }
     // Iniciar inmediatamente
     timerIntervalRef.current = setInterval(() => {
-      if (focusStartTime.current) {
+      if (timerEndTime) {
+        // Modo countdown
+        const remaining = timerEndTime - Date.now();
+        if (remaining <= 0) {
+          // Timer terminado - auto desactivar
+          handleTimerComplete();
+        } else {
+          setFocusTime(remaining);
+        }
+      } else if (focusStartTime.current) {
+        // Modo count up (sin límite)
         setFocusTime(Date.now() - focusStartTime.current);
       }
     }, 1000);
@@ -113,15 +288,45 @@ export default function App() {
     }
   };
 
+  // Auto-desactivar cuando termina el countdown
+  const handleTimerComplete = async () => {
+    stopTimer();
+    Vibration.vibrate([0, 500, 200, 500, 200, 500]); // Vibración larga
+    Alert.alert(
+      '¡Tiempo completado!',
+      'Has completado tu sesión de focus.',
+      [{ text: 'OK' }]
+    );
+
+    // Desactivar focus mode
+    setIsLocked(false);
+    setFocusTime(0);
+    setTimerEndTime(null);
+    setSelectedDuration(null);
+    focusStartTime.current = null;
+
+    // Finalizar sesión de analytics
+    await analyticsService.endSession(true);
+    loadStats();
+
+    // Desactivar Screen Time (el schedule debería manejarlo, pero por seguridad)
+    if (isScreenTimeAvailable() && screenTimeEnabled) {
+      await screenTimeService.endFocusSession();
+    }
+
+    // Actualizar en Supabase
+    await brickStatusService.deactivate();
+  };
+
   // Manejar inicio/parada del timer cuando cambia isLocked
   useEffect(() => {
-    if (isLocked && focusStartTime.current) {
+    if (isLocked && (focusStartTime.current || timerEndTime)) {
       startTimer();
     } else {
       stopTimer();
     }
     return () => stopTimer();
-  }, [isLocked]);
+  }, [isLocked, timerEndTime]);
 
   // Animación de pulso cuando está activo
   useEffect(() => {
@@ -145,7 +350,7 @@ export default function App() {
     }
   }, [isLocked]);
 
-  // Leer tag NFC usando evento (más simple y estable)
+  // Leer tag NFC usando requestTechnology (funciona en iOS y Android)
   const readNfc = async () => {
     console.log('readNfc called');
     console.log('nfcSupported:', nfcSupported);
@@ -161,78 +366,193 @@ export default function App() {
       return;
     }
 
+    // Limpiar cualquier sesión anterior y esperar un momento
+    try {
+      await NfcManager.cancelTechnologyRequest();
+    } catch (e) {
+      // Ignorar - puede no haber sesión activa
+    }
+
+    // Pequeño delay para que iOS resetee la sesión NFC
+    await new Promise(resolve => setTimeout(resolve, 300));
+
     setIsScanning(true);
     console.log('Starting NFC scan...');
 
     try {
-      // Registrar handler para cuando se detecte un tag
-      NfcManager.setEventListener(NfcEvents.DiscoverTag, (tag) => {
-        console.log('Tag discovered:', tag);
-        Vibration.vibrate(100);
-        NfcManager.unregisterTagEvent().catch(() => {});
-        setIsScanning(false);
-        toggleFocus();
+      // En iOS, usar MifareIOS para NTAG215
+      const tech = Platform.OS === 'ios' ? NfcTech.MifareIOS : NfcTech.NfcA;
+      console.log('Using tech:', tech);
+
+      await NfcManager.requestTechnology(tech, {
+        alertMessage: 'Acerca tu Brick NFC al iPhone',
       });
 
-      // Iniciar escaneo
-      await NfcManager.registerTagEvent();
-      console.log('Tag event registered, waiting for tag...');
+      const tag = await NfcManager.getTag();
+      console.log('Tag discovered:', JSON.stringify(tag));
+
+      // Limpiar sesión NFC inmediatamente
+      await NfcManager.cancelTechnologyRequest();
+
+      Vibration.vibrate(100);
+      setIsScanning(false);
+
+      if (isLocked) {
+        // Si ya está activo, desactivar
+        toggleFocus('nfc');
+      } else {
+        // Si no está activo, mostrar selector de duración
+        setShowDurationPicker(true);
+      }
 
     } catch (e) {
-      console.log('NFC error:', e);
+      console.log('NFC error:', e.message || e);
       setIsScanning(false);
-      Alert.alert('Error NFC', 'No se pudo iniciar el escaneo');
+
+      // Limpiar sesión
+      try {
+        await NfcManager.cancelTechnologyRequest();
+      } catch (cleanupError) {}
+
+      // Solo mostrar error si no fue cancelado por el usuario
+      const errorMsg = e.message || '';
+      if (!errorMsg.includes('cancel') && !errorMsg.includes('Cancel')) {
+        Alert.alert('Error NFC', `No se pudo leer: ${errorMsg || 'Intenta de nuevo'}`);
+      }
     }
   };
 
   // Cancelar escaneo
   const cancelNfcScan = async () => {
     try {
-      NfcManager.setEventListener(NfcEvents.DiscoverTag, null);
-      await NfcManager.unregisterTagEvent();
+      await NfcManager.cancelTechnologyRequest();
     } catch (e) {
       console.log('Cancel error:', e);
     }
     setIsScanning(false);
   };
 
-  // Toggle focus mode via Supabase
-  const toggleFocus = async () => {
+  // Iniciar focus con duración específica
+  const startFocusWithDuration = async (duration, source = 'mobile') => {
     try {
-      // Actualizar UI inmediatamente para mejor UX
-      const newLockState = !isLocked;
-      setIsLocked(newLockState);
+      setShowDurationPicker(false);
+      setSelectedDuration(duration);
 
-      if (newLockState) {
-        // Iniciar timer inmediatamente
-        focusStartTime.current = Date.now();
-        setFocusTime(0);
-        startTimer();
+      // Actualizar UI inmediatamente
+      setIsLocked(true);
+      focusStartTime.current = Date.now();
+
+      if (duration) {
+        // Modo countdown
+        const endTime = Date.now() + duration * 1000;
+        setTimerEndTime(endTime);
+        setFocusTime(duration * 1000);
       } else {
-        stopTimer();
-        focusStartTime.current = null;
+        // Modo sin límite (count up)
+        setTimerEndTime(null);
         setFocusTime(0);
       }
 
-      const newStatus = await brickStatusService.toggle();
-      console.log('Toggle enviado:', newStatus.is_locked);
+      startTimer();
+      await analyticsService.startSession(source);
 
-      // Si el servidor devuelve un estado diferente, corregir
-      if (newStatus.is_locked !== newLockState) {
-        setIsLocked(newStatus.is_locked);
-        if (newStatus.is_locked && newStatus.last_updated) {
-          focusStartTime.current = new Date(newStatus.last_updated).getTime();
-        }
-      } else if (newStatus.last_updated) {
-        // Sincronizar con timestamp del servidor
-        focusStartTime.current = new Date(newStatus.last_updated).getTime();
+      // Activar bloqueo de apps con Screen Time (iOS)
+      if (isScreenTimeAvailable() && screenTimeEnabled) {
+        await screenTimeService.startFocusSession(duration);
+        console.log('Screen Time blocking activated');
+      }
+
+      const newStatus = await brickStatusService.toggle(duration);
+      console.log('Focus iniciado:', newStatus.is_locked, duration ? `${duration}s` : 'sin límite');
+
+      if (newStatus.timer_end_at) {
+        setTimerEndTime(new Date(newStatus.timer_end_at).getTime());
       }
     } catch (error) {
+      console.log('Error starting focus:', error);
+      setIsLocked(false);
+      setTimerEndTime(null);
+      setSelectedDuration(null);
+      Alert.alert('Error', 'No se pudo iniciar focus');
+    }
+  };
+
+  // Toggle focus mode via Supabase
+  const toggleFocus = async (source = 'mobile') => {
+    if (!isLocked) {
+      // Mostrar selector de duración antes de activar
+      setShowDurationPicker(true);
+      return;
+    }
+
+    // Desactivar focus
+    try {
+      stopTimer();
+      setIsLocked(false);
+      setFocusTime(0);
+      setTimerEndTime(null);
+      setSelectedDuration(null);
+      focusStartTime.current = null;
+
+      await analyticsService.endSession(true);
+      loadStats();
+
+      // Desactivar bloqueo de apps con Screen Time (iOS)
+      if (isScreenTimeAvailable() && screenTimeEnabled) {
+        await screenTimeService.endFocusSession();
+        console.log('Screen Time blocking deactivated');
+      }
+
+      await brickStatusService.deactivate();
+      console.log('Focus desactivado');
+    } catch (error) {
       console.log('Error toggling:', error);
-      // Revertir cambio si falla
-      setIsLocked(isLocked);
       Alert.alert('Error', 'No se pudo cambiar el estado');
     }
+  };
+
+  // Cargar estadísticas
+  const loadStats = async () => {
+    const allStats = await analyticsService.getAllStats();
+    setStats(allStats);
+  };
+
+  // Agregar sitio bloqueado
+  const addSite = async () => {
+    if (!newSite.trim()) return;
+
+    try {
+      await blockedSitesService.addSite(newSite.trim());
+      setNewSite('');
+      const sites = await blockedSitesService.getSites();
+      setBlockedSites(sites);
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo agregar el sitio');
+    }
+  };
+
+  // Eliminar sitio bloqueado
+  const removeSite = async (domain) => {
+    Alert.alert(
+      'Eliminar sitio',
+      `¿Eliminar ${domain} de la lista?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockedSitesService.removeSite(domain);
+              const sites = await blockedSitesService.getSites();
+              setBlockedSites(sites);
+            } catch (error) {
+              Alert.alert('Error', 'No se pudo eliminar el sitio');
+            }
+          }
+        }
+      ]
+    );
   };
 
   // Formatear tiempo
@@ -245,70 +565,359 @@ export default function App() {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
       <StatusBar style="light" />
 
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.logo}>🧱</Text>
-        <Text style={styles.title}>Brick Focus</Text>
-        <View style={[styles.connectionDot, connected && styles.connected]} />
-      </View>
-
-      {/* Status */}
-      <Animated.View
-        style={[
-          styles.statusContainer,
-          isLocked && styles.statusActive,
-          { transform: [{ scale: pulseAnim }] }
-        ]}
+      {/* App Blocker Modal (Screen Time) */}
+      <Modal
+        visible={showAppBlocker}
+        animationType="slide"
+        onRequestClose={() => setShowAppBlocker(false)}
       >
-        <Text style={[styles.statusLabel, isLocked && styles.statusLabelActive]}>
-          {isLocked ? 'FOCUS ACTIVO' : 'FOCUS INACTIVO'}
-        </Text>
-        {isLocked && (
-          <Text style={styles.timer}>{formatTime(focusTime)}</Text>
+        <AppBlockerScreen
+          onClose={() => setShowAppBlocker(false)}
+          onSelectionSaved={() => setScreenTimeEnabled(true)}
+        />
+      </Modal>
+
+      {/* Duration Picker Modal */}
+      <Modal
+        visible={showDurationPicker}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDurationPicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>¿Cuánto tiempo de focus?</Text>
+
+            {/* Presets */}
+            <View style={styles.presetsGrid}>
+              {DURATION_PRESETS.map((preset) => (
+                <TouchableOpacity
+                  key={preset.seconds}
+                  style={styles.presetButton}
+                  onPress={() => startFocusWithDuration(preset.seconds)}
+                >
+                  <Text style={styles.presetEmoji}>{preset.emoji}</Text>
+                  <Text style={styles.presetLabel}>{preset.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Custom duration */}
+            <View style={styles.customDuration}>
+              <TextInput
+                style={styles.customInput}
+                placeholder="Minutos"
+                placeholderTextColor="#666"
+                keyboardType="number-pad"
+                value={customMinutes}
+                onChangeText={setCustomMinutes}
+              />
+              <TouchableOpacity
+                style={styles.customButton}
+                onPress={() => {
+                  const mins = parseInt(customMinutes);
+                  if (mins > 0) {
+                    startFocusWithDuration(mins * 60);
+                    setCustomMinutes('');
+                  }
+                }}
+              >
+                <Text style={styles.customButtonText}>Iniciar</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Sin límite */}
+            <TouchableOpacity
+              style={styles.noLimitButton}
+              onPress={() => startFocusWithDuration(null)}
+            >
+              <Text style={styles.noLimitText}>Sin límite ∞</Text>
+            </TouchableOpacity>
+
+            {/* Cancelar */}
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setShowDurationPicker(false)}
+            >
+              <Text style={styles.cancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.logo}>🧱</Text>
+          <Text style={styles.title}>Brick Focus</Text>
+          <View style={[styles.connectionDot, connected && styles.connected]} />
+        </View>
+
+        {/* Status */}
+        <Animated.View
+          style={[
+            styles.statusContainer,
+            isLocked && styles.statusActive,
+            { transform: [{ scale: pulseAnim }] }
+          ]}
+        >
+          <Text style={[styles.statusLabel, isLocked && styles.statusLabelActive]}>
+            {isLocked ? 'FOCUS ACTIVO' : 'FOCUS INACTIVO'}
+          </Text>
+          {isLocked && (
+            <Text style={styles.timer}>{formatTime(focusTime)}</Text>
+          )}
+        </Animated.View>
+
+        {/* NFC Button */}
+        <TouchableOpacity
+          style={[styles.nfcButton, isScanning && styles.nfcButtonScanning]}
+          onPress={isScanning ? cancelNfcScan : readNfc}
+        >
+          <Text style={styles.nfcButtonText}>
+            {isScanning ? 'Cancelar escaneo' : 'Escanear NFC'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Manual Toggle */}
+        <TouchableOpacity
+          style={[
+            styles.toggleButton,
+            isLocked ? styles.toggleButtonOff : styles.toggleButtonOn
+          ]}
+          onPress={toggleFocus}
+        >
+          <Text style={styles.toggleButtonText}>
+            {isLocked ? 'Desactivar Focus' : 'Activar Focus'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* App Blocker Section (iOS only) */}
+        {Platform.OS === 'ios' && (
+          <TouchableOpacity
+            style={[styles.sitesHeader, styles.appBlockerHeader]}
+            onPress={() => setShowAppBlocker(true)}
+          >
+            <View style={styles.appBlockerLeft}>
+              <Text style={styles.appBlockerIcon}>📱</Text>
+              <View>
+                <Text style={styles.sitesTitle}>Bloqueo de Apps</Text>
+                <Text style={styles.appBlockerSubtitle}>
+                  {screenTimeEnabled ? 'Configurado' : 'Toca para configurar'}
+                </Text>
+              </View>
+            </View>
+            <View style={[
+              styles.appBlockerStatus,
+              screenTimeEnabled && styles.appBlockerStatusActive
+            ]}>
+              <Text style={[
+                styles.appBlockerStatusText,
+                screenTimeEnabled && styles.appBlockerStatusTextActive
+              ]}>
+                {screenTimeEnabled ? 'ON' : 'OFF'}
+              </Text>
+            </View>
+          </TouchableOpacity>
         )}
-      </Animated.View>
 
-      {/* NFC Button */}
-      <TouchableOpacity
-        style={[styles.nfcButton, isScanning && styles.nfcButtonScanning]}
-        onPress={isScanning ? cancelNfcScan : readNfc}
+        {/* Blocked Sites Section */}
+        <TouchableOpacity
+          style={styles.sitesHeader}
+          onPress={() => setShowSites(!showSites)}
+        >
+          <Text style={styles.sitesTitle}>
+            Sitios bloqueados ({blockedSites.length})
+          </Text>
+          <Text style={styles.sitesArrow}>{showSites ? '▼' : '▶'}</Text>
+        </TouchableOpacity>
+
+        {showSites && (
+          <View style={styles.sitesContainer}>
+            {/* Add site input */}
+            <View style={styles.addSiteRow}>
+              <TextInput
+                style={styles.addSiteInput}
+                placeholder="ejemplo.com"
+                placeholderTextColor="#666"
+                value={newSite}
+                onChangeText={setNewSite}
+                autoCapitalize="none"
+                autoCorrect={false}
+                onSubmitEditing={addSite}
+              />
+              <TouchableOpacity style={styles.addSiteBtn} onPress={addSite}>
+                <Text style={styles.addSiteBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Sites list */}
+            {blockedSites.map((site) => (
+              <View key={site.domain} style={styles.siteItem}>
+                <Text style={styles.siteIcon}>{site.icon || '🌐'}</Text>
+                <Text style={styles.siteDomain}>{site.domain}</Text>
+                <TouchableOpacity onPress={() => removeSite(site.domain)}>
+                  <Text style={styles.siteRemove}>×</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Stats Section */}
+        <TouchableOpacity
+          style={styles.sitesHeader}
+          onPress={() => {
+            setShowStats(!showStats);
+            if (!showStats) loadStats();
+          }}
+        >
+          <Text style={styles.sitesTitle}>
+            Estadísticas
+          </Text>
+          <Text style={styles.sitesArrow}>{showStats ? '▼' : '▶'}</Text>
+        </TouchableOpacity>
+
+        {showStats && stats && (
+          <View style={styles.statsContainer}>
+            {/* Today stats */}
+            <Text style={styles.statsSection}>Hoy</Text>
+            <View style={styles.statsRow}>
+              <View style={styles.statBox}>
+                <Text style={styles.statNumber}>{stats.today?.totalMinutes || 0}</Text>
+                <Text style={styles.statLabel}>minutos</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statNumber}>{stats.today?.totalSessions || 0}</Text>
+                <Text style={styles.statLabel}>sesiones</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statNumber}>{stats.today?.blockedAttempts || 0}</Text>
+                <Text style={styles.statLabel}>bloqueados</Text>
+              </View>
+            </View>
+
+            {/* Week stats */}
+            <Text style={styles.statsSection}>Esta semana</Text>
+            <View style={styles.statsRow}>
+              <View style={styles.statBox}>
+                <Text style={styles.statNumber}>{stats.week?.totalHours || 0}</Text>
+                <Text style={styles.statLabel}>horas</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statNumber}>{stats.week?.totalSessions || 0}</Text>
+                <Text style={styles.statLabel}>sesiones</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statNumber}>{stats.streak || 0}</Text>
+                <Text style={styles.statLabel}>racha</Text>
+              </View>
+            </View>
+
+            {/* Top blocked sites */}
+            {stats.topBlocked && stats.topBlocked.length > 0 && (
+              <>
+                <Text style={styles.statsSection}>Más bloqueados</Text>
+                {stats.topBlocked.map((site, i) => (
+                  <View key={site.domain} style={styles.topBlockedItem}>
+                    <Text style={styles.topBlockedRank}>#{i + 1}</Text>
+                    <Text style={styles.topBlockedDomain}>{site.domain}</Text>
+                    <Text style={styles.topBlockedCount}>{site.count}x</Text>
+                  </View>
+                ))}
+              </>
+            )}
+          </View>
+        )}
+
+        {/* Info */}
+        <View style={styles.infoContainer}>
+          <Text style={styles.infoText}>
+            {session.user.email}
+          </Text>
+          <Text style={styles.infoText}>
+            {!NfcManager
+              ? 'NFC no disponible (Expo Go)'
+              : nfcSupported
+                ? (nfcEnabled ? 'NFC listo' : 'NFC desactivado')
+                : 'NFC no soportado'
+            }
+          </Text>
+          <Text style={styles.infoText}>
+            {connected ? 'Conectado a Supabase' : 'Sin conexion'}
+          </Text>
+
+          <TouchableOpacity
+            style={styles.linkButton}
+            onPress={async () => {
+              try {
+                const { code } = await linkCodesService.createLinkCode();
+                setLinkCode(code);
+                setShowLinkCode(true);
+              } catch (error) {
+                Alert.alert('Error', 'No se pudo generar el código');
+              }
+            }}
+          >
+            <Text style={styles.linkButtonText}>Vincular extensión Chrome</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={() => {
+              Alert.alert(
+                'Cerrar sesión',
+                '¿Estás seguro?',
+                [
+                  { text: 'Cancelar', style: 'cancel' },
+                  {
+                    text: 'Cerrar sesión',
+                    style: 'destructive',
+                    onPress: () => supabase.auth.signOut()
+                  }
+                ]
+              );
+            }}
+          >
+            <Text style={styles.logoutText}>Cerrar sesión</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+
+      {/* Link Code Modal */}
+      <Modal
+        visible={showLinkCode}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowLinkCode(false)}
       >
-        <Text style={styles.nfcButtonText}>
-          {isScanning ? 'Cancelar escaneo' : 'Escanear NFC'}
-        </Text>
-      </TouchableOpacity>
-
-      {/* Manual Toggle */}
-      <TouchableOpacity
-        style={[
-          styles.toggleButton,
-          isLocked ? styles.toggleButtonOff : styles.toggleButtonOn
-        ]}
-        onPress={toggleFocus}
-      >
-        <Text style={styles.toggleButtonText}>
-          {isLocked ? 'Desactivar Focus' : 'Activar Focus'}
-        </Text>
-      </TouchableOpacity>
-
-      {/* Info */}
-      <View style={styles.infoContainer}>
-        <Text style={styles.infoText}>
-          {!NfcManager
-            ? 'NFC no disponible (Expo Go)'
-            : nfcSupported
-              ? (nfcEnabled ? 'NFC listo' : 'NFC desactivado')
-              : 'NFC no soportado'
-          }
-        </Text>
-        <Text style={styles.infoText}>
-          {connected ? 'Conectado a Supabase' : 'Sin conexion'}
-        </Text>
-      </View>
-    </View>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Vincular extensión</Text>
+            <Text style={styles.linkCodeInstructions}>
+              Ingresa este código en la extensión de Chrome:
+            </Text>
+            <Text style={styles.linkCodeDisplay}>{linkCode}</Text>
+            <Text style={styles.linkCodeExpiry}>Expira en 5 minutos</Text>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setShowLinkCode(false)}
+            >
+              <Text style={styles.cancelText}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -316,9 +925,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#1a1a2e',
+  },
+  scrollContent: {
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
+    paddingVertical: 60,
+    paddingHorizontal: 20,
   },
   header: {
     alignItems: 'center',
@@ -404,13 +1015,324 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   infoContainer: {
-    position: 'absolute',
-    bottom: 40,
     alignItems: 'center',
+    marginTop: 30,
   },
   infoText: {
     color: '#666',
     fontSize: 12,
     marginVertical: 2,
+  },
+  // Blocked sites styles
+  sitesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    backgroundColor: '#2d2d44',
+    borderRadius: 12,
+    marginTop: 20,
+  },
+  sitesTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  sitesArrow: {
+    color: '#666',
+    fontSize: 14,
+  },
+  sitesContainer: {
+    width: '100%',
+    backgroundColor: '#2d2d44',
+    borderRadius: 12,
+    marginTop: 10,
+    padding: 15,
+  },
+  addSiteRow: {
+    flexDirection: 'row',
+    marginBottom: 15,
+  },
+  addSiteInput: {
+    flex: 1,
+    backgroundColor: '#1a1a2e',
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    color: '#fff',
+    fontSize: 14,
+    marginRight: 10,
+  },
+  addSiteBtn: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addSiteBtnText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  siteItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#3d3d5c',
+  },
+  siteIcon: {
+    fontSize: 18,
+    marginRight: 12,
+  },
+  siteDomain: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 14,
+  },
+  siteRemove: {
+    color: '#e53935',
+    fontSize: 24,
+    paddingHorizontal: 10,
+  },
+  // Stats styles
+  statsContainer: {
+    width: '100%',
+    backgroundColor: '#2d2d44',
+    borderRadius: 12,
+    marginTop: 10,
+    padding: 15,
+  },
+  statsSection: {
+    color: '#888',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 10,
+    marginTop: 15,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statBox: {
+    flex: 1,
+    backgroundColor: '#1a1a2e',
+    borderRadius: 10,
+    padding: 15,
+    marginHorizontal: 5,
+    alignItems: 'center',
+  },
+  statNumber: {
+    color: '#4CAF50',
+    fontSize: 28,
+    fontWeight: 'bold',
+  },
+  statLabel: {
+    color: '#888',
+    fontSize: 11,
+    marginTop: 5,
+  },
+  topBlockedItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#3d3d5c',
+  },
+  topBlockedRank: {
+    color: '#666',
+    fontSize: 12,
+    width: 30,
+  },
+  topBlockedDomain: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 14,
+  },
+  topBlockedCount: {
+    color: '#e53935',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#2d2d44',
+    borderRadius: 20,
+    padding: 25,
+    width: '100%',
+    maxWidth: 350,
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 25,
+  },
+  presetsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  presetButton: {
+    width: '48%',
+    backgroundColor: '#1a1a2e',
+    borderRadius: 15,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#3d3d5c',
+  },
+  presetEmoji: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  presetLabel: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  customDuration: {
+    flexDirection: 'row',
+    marginBottom: 15,
+  },
+  customInput: {
+    flex: 1,
+    backgroundColor: '#1a1a2e',
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    color: '#fff',
+    fontSize: 16,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#3d3d5c',
+  },
+  customButton: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 10,
+    paddingHorizontal: 20,
+    justifyContent: 'center',
+  },
+  customButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  noLimitButton: {
+    backgroundColor: '#4a4a6a',
+    borderRadius: 10,
+    padding: 15,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  noLimitText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  cancelButton: {
+    padding: 15,
+    alignItems: 'center',
+  },
+  cancelText: {
+    color: '#888',
+    fontSize: 16,
+  },
+  // Auth styles
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#1a1a2e',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  linkButton: {
+    marginTop: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    backgroundColor: '#2d2d44',
+    borderRadius: 8,
+  },
+  linkButtonText: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  linkCodeInstructions: {
+    color: '#888',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  linkCodeDisplay: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+    textAlign: 'center',
+    letterSpacing: 8,
+    marginBottom: 10,
+  },
+  linkCodeExpiry: {
+    color: '#666',
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  logoutButton: {
+    marginTop: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  logoutText: {
+    color: '#e53935',
+    fontSize: 14,
+  },
+  // App Blocker styles
+  appBlockerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  appBlockerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  appBlockerIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  appBlockerSubtitle: {
+    color: '#666',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  appBlockerStatus: {
+    backgroundColor: '#3d3d5c',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  appBlockerStatusActive: {
+    backgroundColor: '#1e3a1e',
+  },
+  appBlockerStatusText: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  appBlockerStatusTextActive: {
+    color: '#4CAF50',
   },
 });

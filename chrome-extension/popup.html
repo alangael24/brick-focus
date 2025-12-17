@@ -5,39 +5,73 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Brick Focus</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       width: 320px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #1a1a2e;
       color: #eee;
     }
+    .container { padding: 20px; }
+    .header { text-align: center; margin-bottom: 20px; }
+    .logo { font-size: 32px; margin-bottom: 8px; }
+    .title { font-size: 18px; font-weight: 600; color: #fff; }
 
-    .container {
-      padding: 20px;
-    }
-
-    .header {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-
-    .logo {
-      font-size: 32px;
-      margin-bottom: 8px;
-    }
-
-    .title {
-      font-size: 18px;
-      font-weight: 600;
+    /* Link Screen */
+    .link-screen { display: none; }
+    .link-screen.active { display: block; }
+    .link-subtitle { color: #888; font-size: 14px; text-align: center; margin-bottom: 20px; line-height: 1.5; }
+    .link-input {
+      width: 100%;
+      padding: 16px;
+      border: 2px solid #3d3d5c;
+      border-radius: 10px;
+      background: #2d2d44;
       color: #fff;
+      font-size: 24px;
+      text-align: center;
+      letter-spacing: 8px;
+      margin-bottom: 12px;
     }
+    .link-input::placeholder { color: #666; letter-spacing: 4px; font-size: 16px; }
+    .link-input:focus { outline: none; border-color: #4CAF50; }
+    .link-btn {
+      width: 100%;
+      padding: 14px 20px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);
+      color: white;
+    }
+    .link-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3); }
+    .link-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .link-error { color: #e53935; font-size: 12px; text-align: center; margin-bottom: 12px; display: none; }
 
+    /* Main Screen */
+    .main-screen { display: none; }
+    .main-screen.active { display: block; }
+    .user-info {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #2d2d44;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 15px;
+    }
+    .user-label { font-size: 12px; color: #4CAF50; }
+    .unlink-btn {
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 4px 8px;
+    }
+    .unlink-btn:hover { color: #e53935; }
     .status {
       text-align: center;
       padding: 20px;
@@ -45,36 +79,19 @@
       margin-bottom: 20px;
       transition: all 0.3s ease;
     }
-
     .status.inactive {
       background: linear-gradient(135deg, #2d2d44 0%, #1a1a2e 100%);
       border: 2px solid #3d3d5c;
     }
-
     .status.active {
       background: linear-gradient(135deg, #1e5128 0%, #0d2818 100%);
       border: 2px solid #4CAF50;
     }
-
-    .status-text {
-      font-size: 14px;
-      color: #888;
-      margin-bottom: 8px;
-    }
-
-    .status-label {
-      font-size: 24px;
-      font-weight: 700;
-    }
-
-    .status.active .status-label {
-      color: #4CAF50;
-    }
-
-    .status.inactive .status-label {
-      color: #888;
-    }
-
+    .status-text { font-size: 14px; color: #888; margin-bottom: 8px; }
+    .status-label { font-size: 24px; font-weight: 700; }
+    .status.active .status-label { color: #4CAF50; }
+    .status.inactive .status-label { color: #888; }
+    .timer { display: none; font-size: 32px; font-weight: bold; color: #4CAF50; margin-top: 10px; font-variant-numeric: tabular-nums; }
     .toggle-btn {
       width: 100%;
       padding: 14px 20px;
@@ -86,91 +103,32 @@
       transition: all 0.2s ease;
       margin-bottom: 20px;
     }
-
-    .toggle-btn.activate {
-      background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);
-      color: white;
-    }
-
-    .toggle-btn.deactivate {
-      background: linear-gradient(135deg, #e53935 0%, #c62828 100%);
-      color: white;
-    }
-
-    .toggle-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    }
-
-    .section-title {
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: #666;
-      margin-bottom: 10px;
-    }
-
-    .sites-list {
-      background: #2d2d44;
-      border-radius: 10px;
-      padding: 12px;
-      max-height: 150px;
-      overflow-y: auto;
-    }
-
-    .site-item {
-      display: flex;
-      align-items: center;
-      padding: 8px 0;
-      border-bottom: 1px solid #3d3d5c;
-    }
-
-    .site-item:last-child {
-      border-bottom: none;
-    }
-
-    .site-icon {
-      width: 20px;
-      height: 20px;
-      background: #4a4a6a;
-      border-radius: 4px;
-      margin-right: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-    }
-
-    .site-name {
-      flex: 1;
-      font-size: 14px;
-    }
-
-    .connection-status {
-      text-align: center;
-      padding: 10px;
-      font-size: 11px;
-      color: #666;
-      margin-top: 15px;
-    }
-
-    .connection-status.connected {
-      color: #4CAF50;
-    }
-
-    .connection-status::before {
-      content: '';
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      margin-right: 6px;
-      background: #666;
-    }
-
-    .connection-status.connected::before {
-      background: #4CAF50;
-    }
+    .toggle-btn.activate { background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%); color: white; }
+    .toggle-btn.deactivate { background: linear-gradient(135deg, #e53935 0%, #c62828 100%); color: white; }
+    .toggle-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 10px; }
+    .sites-list { background: #2d2d44; border-radius: 10px; padding: 12px; max-height: 150px; overflow-y: auto; }
+    .site-item { display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid #3d3d5c; }
+    .site-item:last-child { border-bottom: none; }
+    .site-icon { width: 20px; height: 20px; background: #4a4a6a; border-radius: 4px; margin-right: 10px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+    .site-name { flex: 1; font-size: 14px; }
+    .site-remove { background: none; border: none; color: #e53935; cursor: pointer; font-size: 16px; padding: 4px 8px; opacity: 0.6; transition: opacity 0.2s; }
+    .site-remove:hover { opacity: 1; }
+    .add-site-form { display: flex; gap: 8px; margin-top: 12px; }
+    .add-site-input { flex: 1; padding: 10px 12px; border: 1px solid #3d3d5c; border-radius: 8px; background: #2d2d44; color: #fff; font-size: 14px; }
+    .add-site-input::placeholder { color: #666; }
+    .add-site-input:focus { outline: none; border-color: #4CAF50; }
+    .add-site-btn { padding: 10px 16px; background: #4CAF50; border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .add-site-btn:hover { background: #43A047; }
+    .add-site-btn:disabled { background: #3d3d5c; cursor: not-allowed; }
+    .connection-status { text-align: center; padding: 10px; font-size: 11px; color: #666; margin-top: 15px; }
+    .connection-status.connected { color: #4CAF50; }
+    .connection-status::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: #666; }
+    .connection-status.connected::before { background: #4CAF50; }
+    .stats-row { display: flex; gap: 10px; margin-bottom: 20px; }
+    .stat-card { flex: 1; background: #2d2d44; border-radius: 10px; padding: 12px; text-align: center; }
+    .stat-value { font-size: 24px; font-weight: 700; color: #4CAF50; margin-bottom: 4px; }
+    .stat-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
   </style>
 </head>
 <body>
@@ -180,26 +138,57 @@
       <div class="title">Brick Focus</div>
     </div>
 
-    <div class="status inactive" id="status">
-      <div class="status-text">Modo Focus</div>
-      <div class="status-label" id="statusLabel">INACTIVO</div>
-      <div class="timer" id="timer" style="display:none; font-size:32px; font-weight:bold; color:#4CAF50; margin-top:10px; font-variant-numeric:tabular-nums;">00:00:00</div>
+    <!-- Link Screen -->
+    <div class="link-screen active" id="linkScreen">
+      <p class="link-subtitle">
+        Abre la app en tu teléfono y toca<br>"Vincular extensión Chrome"<br>para obtener un código
+      </p>
+      <div class="link-error" id="linkError"></div>
+      <input type="text" class="link-input" id="linkCodeInput" placeholder="000000" maxlength="6">
+      <button class="link-btn" id="linkBtn">Vincular</button>
     </div>
 
-    <button class="toggle-btn activate" id="toggleBtn">
-      Activar Focus Mode
-    </button>
+    <!-- Main Screen -->
+    <div class="main-screen" id="mainScreen">
+      <div class="user-info">
+        <span class="user-label">Vinculado</span>
+        <button class="unlink-btn" id="unlinkBtn">Desvincular</button>
+      </div>
 
-    <div class="section-title">Sitios bloqueados</div>
-    <div class="sites-list" id="sitesList">
-      <!-- Se llena dinámicamente -->
-    </div>
+      <div class="status inactive" id="status">
+        <div class="status-text">Modo Focus</div>
+        <div class="status-label" id="statusLabel">INACTIVO</div>
+        <div class="timer" id="timer">00:00:00</div>
+      </div>
 
-    <div class="connection-status" id="connectionStatus">
-      Sin conexión al servidor
+      <button class="toggle-btn activate" id="toggleBtn">Activar Focus Mode</button>
+
+      <div class="section-title">Estadísticas de hoy</div>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-value" id="statMinutes">0</div>
+          <div class="stat-label">Minutos</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statSessions">0</div>
+          <div class="stat-label">Sesiones</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statBlocked">0</div>
+          <div class="stat-label">Bloqueados</div>
+        </div>
+      </div>
+
+      <div class="section-title">Sitios bloqueados</div>
+      <div class="sites-list" id="sitesList"></div>
+      <div class="add-site-form">
+        <input type="text" class="add-site-input" id="newSiteInput" placeholder="ejemplo.com">
+        <button class="add-site-btn" id="addSiteBtn">+</button>
+      </div>
+
+      <div class="connection-status" id="connectionStatus">Sin conexión</div>
     </div>
   </div>
-
   <script src="popup.js"></script>
 </body>
 </html>

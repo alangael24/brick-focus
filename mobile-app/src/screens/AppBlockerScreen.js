@@ -147,8 +147,8 @@ export default function AppBlockerScreen({ onClose, onSelectionSaved, isFocusAct
     );
   }
 
-  // Pantalla de autorización denegada
-  if (authStatus === 'denied') {
+  // Pantalla de autorización denegada o error
+  if (authStatus === 'denied' || authStatus === 'error') {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
@@ -159,10 +159,14 @@ export default function AppBlockerScreen({ onClose, onSelectionSaved, isFocusAct
         </View>
 
         <View style={styles.centerContent}>
-          <Text style={styles.unavailableEmoji}>🔒</Text>
-          <Text style={styles.unavailableTitle}>Permiso requerido</Text>
+          <Text style={styles.unavailableEmoji}>{authStatus === 'error' ? '⚠️' : '🔒'}</Text>
+          <Text style={styles.unavailableTitle}>
+            {authStatus === 'error' ? 'Error de Screen Time' : 'Permiso requerido'}
+          </Text>
           <Text style={styles.unavailableText}>
-            Para bloquear apps, necesitas dar permiso de Screen Time a Brick Focus.
+            {authStatus === 'error'
+              ? 'Ocurrió un error al inicializar Screen Time. Verifica que tu dispositivo sea compatible (iOS 17+).'
+              : 'Para bloquear apps, necesitas dar permiso de Screen Time a Brick Focus.'}
           </Text>
           <TouchableOpacity
             style={styles.retryButton}

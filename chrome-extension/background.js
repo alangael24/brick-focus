@@ -37,6 +37,12 @@ async function fetchBlockedSites() {
         }
       }
     );
+
+    if (!response.ok) {
+      console.log('Brick Focus: Error HTTP obteniendo sitios:', response.status);
+      return;
+    }
+
     const data = await response.json();
     if (Array.isArray(data)) {
       blockedSites = data;
@@ -102,6 +108,11 @@ async function removeBlockedSite(domain) {
 
 // Iniciar sesión de focus
 async function startFocusSession() {
+  if (!userId) {
+    console.log('Brick Focus: No user_id, skipping session start');
+    return;
+  }
+
   try {
     const response = await fetch(
       `${SUPABASE_URL}/rest/v1/focus_sessions`,
@@ -114,6 +125,7 @@ async function startFocusSession() {
           'Prefer': 'return=representation'
         },
         body: JSON.stringify({
+          user_id: userId,
           started_at: new Date().toISOString(),
           source: 'chrome',
           completed: false
@@ -179,6 +191,8 @@ async function endFocusSession() {
 
 // Registrar intento de acceso bloqueado
 async function logBlockedAttempt(domain) {
+  if (!userId) return;
+
   try {
     await fetch(
       `${SUPABASE_URL}/rest/v1/blocked_attempts`,
@@ -190,6 +204,7 @@ async function logBlockedAttempt(domain) {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          user_id: userId,
           session_id: currentSessionId,
           domain,
           source: 'chrome'
@@ -204,13 +219,17 @@ async function logBlockedAttempt(domain) {
 
 // Obtener estadísticas de hoy
 async function getTodayStats() {
+  if (!userId) {
+    return { totalSessions: 0, completedSessions: 0, totalMinutes: 0, blockedAttempts: 0 };
+  }
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   try {
-    // Sesiones de hoy
+    // Sesiones de hoy (filtradas por user_id)
     const sessionsRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/focus_sessions?started_at=gte.${today.toISOString()}&select=*`,
+      `${SUPABASE_URL}/rest/v1/focus_sessions?user_id=eq.${userId}&started_at=gte.${today.toISOString()}&select=*`,
       {
         headers: {
           'apikey': SUPABASE_ANON_KEY,
@@ -220,9 +239,9 @@ async function getTodayStats() {
     );
     const sessions = await sessionsRes.json();
 
-    // Intentos bloqueados hoy
+    // Intentos bloqueados hoy (filtrados por user_id)
     const attemptsRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/blocked_attempts?attempted_at=gte.${today.toISOString()}&select=*`,
+      `${SUPABASE_URL}/rest/v1/blocked_attempts?user_id=eq.${userId}&attempted_at=gte.${today.toISOString()}&select=*`,
       {
         headers: {
           'apikey': SUPABASE_ANON_KEY,
@@ -232,19 +251,19 @@ async function getTodayStats() {
     );
     const attempts = await attemptsRes.json();
 
-    const totalSeconds = (sessions || [])
+    const totalSeconds = (Array.isArray(sessions) ? sessions : [])
       .filter(s => s.duration_seconds)
       .reduce((acc, s) => acc + s.duration_seconds, 0);
 
     return {
-      totalSessions: sessions?.length || 0,
-      completedSessions: sessions?.filter(s => s.completed).length || 0,
+      totalSessions: Array.isArray(sessions) ? sessions.length : 0,
+      completedSessions: Array.isArray(sessions) ? sessions.filter(s => s.completed).length : 0,
       totalMinutes: Math.floor(totalSeconds / 60),
-      blockedAttempts: attempts?.length || 0
+      blockedAttempts: Array.isArray(attempts) ? attempts.length : 0
     };
   } catch (error) {
     console.log('Brick Focus: Error getting stats', error);
-    return { totalSessions: 0, totalMinutes: 0, blockedAttempts: 0 };
+    return { totalSessions: 0, completedSessions: 0, totalMinutes: 0, blockedAttempts: 0 };
   }
 }
 
@@ -262,8 +281,14 @@ async function fetchCurrentStatus() {
         }
       }
     );
+
+    if (!response.ok) {
+      console.log('Brick Focus: Error HTTP obteniendo estado:', response.status);
+      return;
+    }
+
     const data = await response.json();
-    if (data && data[0]) {
+    if (Array.isArray(data) && data[0]) {
       setFocusMode(data[0].is_locked);
       // Cargar timer si existe
       if (data[0].timer_end_at) {
@@ -320,26 +345,29 @@ async function autoDeactivateFocus() {
   // Finalizar sesión
   await endFocusSession();
 
-  // Actualizar en Supabase
-  try {
-    await fetch(
-      `${SUPABASE_URL}/rest/v1/brick_config?id=eq.1`,
-      {
-        method: 'PATCH',
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          is_locked: false,
-          timer_duration_seconds: null,
-          timer_end_at: null
-        })
-      }
-    );
-  } catch (error) {
-    console.log('Brick Focus: Error desactivando:', error);
+  // Actualizar en Supabase (usar user_id en lugar de id hardcodeado)
+  if (userId) {
+    try {
+      await fetch(
+        `${SUPABASE_URL}/rest/v1/brick_config?user_id=eq.${userId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            is_locked: false,
+            timer_duration_seconds: null,
+            timer_end_at: null,
+            last_updated: new Date().toISOString()
+          })
+        }
+      );
+    } catch (error) {
+      console.log('Brick Focus: Error desactivando:', error);
+    }
   }
 
   // Notificar al popup
@@ -378,6 +406,10 @@ function initSupabase() {
   connectRealtime();
 }
 
+// Variables para reconexión con backoff exponencial
+let wsReconnectAttempts = 0;
+const MAX_RECONNECT_DELAY = 60000; // 1 minuto máximo
+
 // Conectar a Supabase Realtime via WebSocket
 function connectRealtime() {
   const wsUrl = `${SUPABASE_URL.replace('https', 'wss')}/realtime/v1/websocket?apikey=${SUPABASE_ANON_KEY}&vsn=1.0.0`;
@@ -386,6 +418,7 @@ function connectRealtime() {
 
   ws.onopen = () => {
     console.log('Brick Focus: Conectado a Supabase Realtime');
+    wsReconnectAttempts = 0; // Reset en conexión exitosa
 
     // Join al canal de brick_config
     const joinConfigMsg = {
@@ -476,8 +509,11 @@ function connectRealtime() {
   };
 
   ws.onclose = () => {
-    console.log('Brick Focus: Desconectado, reconectando...');
-    setTimeout(connectRealtime, 5000);
+    wsReconnectAttempts++;
+    // Backoff exponencial: 1s, 2s, 4s, 8s, 16s, 32s, 60s (max)
+    const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts - 1), MAX_RECONNECT_DELAY);
+    console.log(`Brick Focus: Desconectado, reconectando en ${delay/1000}s (intento ${wsReconnectAttempts})`);
+    setTimeout(connectRealtime, delay);
   };
 
   ws.onerror = (error) => {
@@ -632,8 +668,10 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   }
 });
 
-// Polling cada 5 segundos para mantener sincronizado
+// Polling cada 30 segundos como fallback (WebSocket es la fuente principal)
 setInterval(async () => {
+  if (!userId) return;
+
   await fetchCurrentStatus();
 
   const oldSites = JSON.stringify(blockedSites.map(s => s.domain).sort());
@@ -645,4 +683,4 @@ setInterval(async () => {
     updateBlockingRules();
     chrome.runtime.sendMessage({ type: 'sites_changed', blockedSites }).catch(() => {});
   }
-}, 5000);
+}, 30000);

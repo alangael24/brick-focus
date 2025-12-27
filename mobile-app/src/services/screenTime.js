@@ -58,19 +58,25 @@ export const screenTimeService = {
 
   // Guardar selección de apps del usuario
   async saveAppSelection(familyActivitySelection) {
-    if (!isScreenTimeAvailable() || !familyActivitySelection) {
+    if (!isScreenTimeAvailable()) {
+      console.log('Screen Time not available');
+      return false;
+    }
+
+    if (!familyActivitySelection) {
+      console.log('No family activity selection provided');
       return false;
     }
 
     try {
-      ReactNativeDeviceActivity.setFamilyActivitySelectionId({
+      await ReactNativeDeviceActivity.setFamilyActivitySelectionId({
         id: SELECTION_ID,
         familyActivitySelection: familyActivitySelection,
       });
       console.log('App selection saved with ID:', SELECTION_ID);
       return true;
     } catch (error) {
-      console.log('Error saving app selection:', error);
+      console.log('Error saving app selection:', error?.message || error);
       return false;
     }
   },
@@ -156,16 +162,20 @@ export const screenTimeService = {
 
     try {
       // Configurar shield primero
-      await this.configureShield();
+      try {
+        await this.configureShield();
+      } catch (e) {
+        console.log('Shield config error:', e);
+      }
 
       // Bloquear la selección guardada
-      ReactNativeDeviceActivity.blockSelection({
+      await ReactNativeDeviceActivity.blockSelection({
         familyActivitySelectionId: SELECTION_ID,
       });
       console.log('Apps blocked');
       return true;
     } catch (error) {
-      console.log('Error blocking apps:', error);
+      console.log('Error blocking apps:', error?.message || error);
       return false;
     }
   },
@@ -177,13 +187,13 @@ export const screenTimeService = {
     }
 
     try {
-      ReactNativeDeviceActivity.unblockSelection({
+      await ReactNativeDeviceActivity.unblockSelection({
         familyActivitySelectionId: SELECTION_ID,
       });
       console.log('Apps unblocked');
       return true;
     } catch (error) {
-      console.log('Error unblocking apps:', error);
+      console.log('Error unblocking apps:', error?.message || error);
       return false;
     }
   },
@@ -191,12 +201,17 @@ export const screenTimeService = {
   // Iniciar sesión de focus con bloqueo programado
   async startFocusSession(durationSeconds = null) {
     if (!isScreenTimeAvailable()) {
+      console.log('Screen Time not available for focus session');
       return false;
     }
 
     try {
-      // Configurar shield
-      await this.configureShield();
+      // Configurar shield primero
+      try {
+        await this.configureShield();
+      } catch (shieldError) {
+        console.log('Shield config error (non-fatal):', shieldError?.message || shieldError);
+      }
 
       // Detener monitoreo anterior si existe
       try {
@@ -205,64 +220,20 @@ export const screenTimeService = {
         // Ignorar error si no había monitoreo activo
       }
 
-      if (durationSeconds) {
-        // Sesión con duración específica
-        const now = new Date();
-        const endTime = new Date(now.getTime() + durationSeconds * 1000);
-
-        // Configurar acciones para cuando inicie el intervalo
-        ReactNativeDeviceActivity.configureActions({
-          activityName: ACTIVITY_NAME,
-          callbackName: 'intervalDidStart',
-          actions: [
-            {
-              type: 'blockSelection',
-              familyActivitySelectionId: SELECTION_ID,
-              shieldId: SHIELD_ID,
-            },
-          ],
+      // Bloquear apps directamente (más simple y confiable)
+      try {
+        await ReactNativeDeviceActivity.blockSelection({
+          familyActivitySelectionId: SELECTION_ID,
         });
-
-        // Configurar acciones para cuando termine el intervalo
-        ReactNativeDeviceActivity.configureActions({
-          activityName: ACTIVITY_NAME,
-          callbackName: 'intervalDidEnd',
-          actions: [
-            {
-              type: 'unblockSelection',
-              familyActivitySelectionId: SELECTION_ID,
-            },
-          ],
-        });
-
-        // Iniciar monitoreo con el schedule
-        await ReactNativeDeviceActivity.startMonitoring(
-          ACTIVITY_NAME,
-          {
-            intervalStart: {
-              hour: now.getHours(),
-              minute: now.getMinutes(),
-              second: now.getSeconds(),
-            },
-            intervalEnd: {
-              hour: endTime.getHours(),
-              minute: endTime.getMinutes(),
-              second: endTime.getSeconds(),
-            },
-            repeats: false,
-          },
-          []
-        );
-        console.log('Focus session started with duration:', durationSeconds);
-      } else {
-        // Sesión sin límite - bloquear directamente
-        await this.blockApps();
-        console.log('Focus session started without time limit');
+        console.log('Apps blocked for focus session');
+      } catch (blockError) {
+        console.log('Error blocking apps:', blockError?.message || blockError);
+        // Continuar aunque falle el bloqueo
       }
 
       return true;
     } catch (error) {
-      console.log('Error starting focus session:', error);
+      console.log('Error starting focus session:', error?.message || error);
       return false;
     }
   },

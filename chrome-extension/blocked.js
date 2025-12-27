@@ -52,7 +52,12 @@ async function fetchStatus() {
 
       // Si ya no está bloqueado, redirigir de vuelta
       if (!data[0].is_locked) {
-        history.back();
+        // Verificar si hay historial, si no ir a nueva pestaña
+        if (window.history.length > 1) {
+          history.back();
+        } else {
+          window.location.href = 'chrome://newtab';
+        }
       }
 
       updateTimer();
@@ -99,5 +104,9 @@ init();
 // Botón volver atrás
 document.getElementById('backBtn').addEventListener('click', (e) => {
   e.preventDefault();
-  history.back();
+  if (window.history.length > 1) {
+    history.back();
+  } else {
+    window.location.href = 'chrome://newtab';
+  }
 });

@@ -309,7 +309,7 @@ function updateUI() {
   if (focusMode) {
     statusEl.classList.remove('inactive');
     statusEl.classList.add('active');
-    statusLabelEl.textContent = timerEndAt ? 'COUNTDOWN' : 'ACTIVO';
+    statusLabelEl.textContent = timerEndAt ? 'CUENTA REGRESIVA' : 'ACTIVO';
     toggleBtnEl.textContent = 'Desactivar Focus Mode';
     toggleBtnEl.classList.remove('activate');
     toggleBtnEl.classList.add('deactivate');
@@ -353,7 +353,7 @@ function renderSitesList() {
   });
 }
 
-// Polling
+// Polling reducido - cada 10 segundos (background ya mantiene estado via WebSocket)
 setInterval(async () => {
   if (userId) {
     await fetchStatus();
@@ -367,11 +367,15 @@ setInterval(async () => {
           blockedSites = response.blockedSites || [];
           renderSitesList();
         }
+        // Sincronizar timerEndAt
+        if (response.timerEndAt !== timerEndAt) {
+          timerEndAt = response.timerEndAt;
+        }
       }
     });
     loadStats();
   }
-}, 3000);
+}, 10000);
 
 // Inicializar
 init();

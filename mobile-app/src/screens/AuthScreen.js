@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 
-export default function AuthScreen({ onAuth }) {
+export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -23,8 +23,9 @@ export default function AuthScreen({ onAuth }) {
       return;
     }
 
-    // Validar email básico
-    if (!email.includes('@') || !email.includes('.')) {
+    // Validar email con regex más robusto
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
       Alert.alert('Error', 'Ingresa un email válido');
       return;
     }

@@ -14,8 +14,10 @@ import {
   Modal,
   ActivityIndicator,
   Linking,
+  Image,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './src/lib/supabase';
 import { brickStatusService } from './src/services/brickStatus';
 import { blockedSitesService } from './src/services/blockedSites';
@@ -139,6 +141,7 @@ function MainApp({ session }) {
   const [screenTimeEnabled, setScreenTimeEnabled] = useState(false);
   const [showLinkCode, setShowLinkCode] = useState(false);
   const [linkCode, setLinkCode] = useState(null);
+  const [showChromeOffer, setShowChromeOffer] = useState(false);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const focusStartTime = useRef(null);
@@ -187,6 +190,12 @@ function MainApp({ session }) {
           }
         }
         setConnected(true);
+
+        // Verificar si mostrar offer de Chrome extension
+        const chromeOfferShown = await AsyncStorage.getItem('chromeOfferShown');
+        if (!chromeOfferShown) {
+          setShowChromeOffer(true);
+        }
 
         // Suscribirse a cambios en tiempo real
         const userId = session.user.id;
@@ -311,7 +320,11 @@ function MainApp({ session }) {
 
     // Desactivar Screen Time (el schedule debería manejarlo, pero por seguridad)
     if (isScreenTimeAvailable() && screenTimeEnabled) {
-      await screenTimeService.endFocusSession();
+      try {
+        await screenTimeService.endFocusSession();
+      } catch (e) {
+        console.log('Screen Time end error:', e);
+      }
     }
 
     // Actualizar en Supabase
@@ -320,18 +333,27 @@ function MainApp({ session }) {
 
   // Manejar inicio/parada del timer cuando cambia isLocked
   useEffect(() => {
+    // Siempre limpiar timer anterior primero
+    stopTimer();
+
     if (isLocked && (focusStartTime.current || timerEndTime)) {
       startTimer();
-    } else {
-      stopTimer();
     }
+
     return () => stopTimer();
   }, [isLocked, timerEndTime]);
 
   // Animación de pulso cuando está activo
+  const pulseAnimRef = useRef(null);
+
   useEffect(() => {
     if (isLocked) {
-      Animated.loop(
+      // Detener animación anterior si existe
+      if (pulseAnimRef.current) {
+        pulseAnimRef.current.stop();
+      }
+      // Crear y guardar referencia a la nueva animación
+      pulseAnimRef.current = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
             toValue: 1.1,
@@ -344,10 +366,23 @@ function MainApp({ session }) {
             useNativeDriver: true,
           }),
         ])
-      ).start();
+      );
+      pulseAnimRef.current.start();
     } else {
+      // Detener animación y resetear
+      if (pulseAnimRef.current) {
+        pulseAnimRef.current.stop();
+        pulseAnimRef.current = null;
+      }
       pulseAnim.setValue(1);
     }
+
+    // Cleanup al desmontar
+    return () => {
+      if (pulseAnimRef.current) {
+        pulseAnimRef.current.stop();
+      }
+    };
   }, [isLocked]);
 
   // Leer tag NFC usando requestTechnology (funciona en iOS y Android)
@@ -434,19 +469,25 @@ function MainApp({ session }) {
 
   // Iniciar focus con duración específica
   const startFocusWithDuration = async (duration, source = 'mobile') => {
-    try {
-      setShowDurationPicker(false);
-      setSelectedDuration(duration);
+    setShowDurationPicker(false);
 
-      // Actualizar UI inmediatamente
+    try {
+      // Primero actualizar en Supabase para confirmar que funciona
+      const newStatus = await brickStatusService.setLocked(true, duration);
+      console.log('Focus iniciado:', newStatus.is_locked, duration ? `${duration}s` : 'sin límite');
+
+      // Solo si Supabase confirmó, actualizar UI y analytics
+      setSelectedDuration(duration);
       setIsLocked(true);
       focusStartTime.current = Date.now();
 
       if (duration) {
-        // Modo countdown
-        const endTime = Date.now() + duration * 1000;
+        // Modo countdown - usar tiempo de Supabase para sincronización
+        const endTime = newStatus.timer_end_at
+          ? new Date(newStatus.timer_end_at).getTime()
+          : Date.now() + duration * 1000;
         setTimerEndTime(endTime);
-        setFocusTime(duration * 1000);
+        setFocusTime(endTime - Date.now());
       } else {
         // Modo sin límite (count up)
         setTimerEndTime(null);
@@ -454,25 +495,26 @@ function MainApp({ session }) {
       }
 
       startTimer();
+
+      // Iniciar analytics después de confirmar estado
       await analyticsService.startSession(source);
 
       // Activar bloqueo de apps con Screen Time (iOS)
       if (isScreenTimeAvailable() && screenTimeEnabled) {
-        await screenTimeService.startFocusSession(duration);
-        console.log('Screen Time blocking activated');
-      }
-
-      const newStatus = await brickStatusService.toggle(duration);
-      console.log('Focus iniciado:', newStatus.is_locked, duration ? `${duration}s` : 'sin límite');
-
-      if (newStatus.timer_end_at) {
-        setTimerEndTime(new Date(newStatus.timer_end_at).getTime());
+        try {
+          await screenTimeService.startFocusSession(duration);
+          console.log('Screen Time blocking activated');
+        } catch (screenTimeError) {
+          console.log('Screen Time error (non-fatal):', screenTimeError);
+        }
       }
     } catch (error) {
       console.log('Error starting focus:', error);
+      // Revertir estado local
       setIsLocked(false);
       setTimerEndTime(null);
       setSelectedDuration(null);
+      stopTimer();
       Alert.alert('Error', 'No se pudo iniciar focus');
     }
   };
@@ -499,8 +541,12 @@ function MainApp({ session }) {
 
       // Desactivar bloqueo de apps con Screen Time (iOS)
       if (isScreenTimeAvailable() && screenTimeEnabled) {
-        await screenTimeService.endFocusSession();
-        console.log('Screen Time blocking deactivated');
+        try {
+          await screenTimeService.endFocusSession();
+          console.log('Screen Time blocking deactivated');
+        } catch (screenTimeError) {
+          console.log('Screen Time end error (non-fatal):', screenTimeError);
+        }
       }
 
       await brickStatusService.deactivate();
@@ -580,6 +626,7 @@ function MainApp({ session }) {
         <AppBlockerScreen
           onClose={() => setShowAppBlocker(false)}
           onSelectionSaved={() => setScreenTimeEnabled(true)}
+          isFocusActive={isLocked}
         />
       </Modal>
 
@@ -913,6 +960,57 @@ function MainApp({ session }) {
               onPress={() => setShowLinkCode(false)}
             >
               <Text style={styles.cancelText}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Chrome Extension Offer Modal */}
+      <Modal
+        visible={showChromeOffer}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowChromeOffer(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.chromeOfferEmoji}>🌐</Text>
+            <Text style={styles.modalTitle}>Extensión de Chrome</Text>
+            <Text style={styles.chromeOfferText}>
+              Bloquea sitios web distractores en tu computadora sincronizado con tu teléfono
+            </Text>
+
+            <Image
+              source={{ uri: 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=https://brickfocus.app/chrome' }}
+              style={styles.qrCode}
+            />
+            <Text style={styles.qrCodeLabel}>Escanea para descargar</Text>
+
+            <TouchableOpacity
+              style={styles.chromeOfferButton}
+              onPress={async () => {
+                setShowChromeOffer(false);
+                await AsyncStorage.setItem('chromeOfferShown', 'true');
+                try {
+                  const { code } = await linkCodesService.createLinkCode();
+                  setLinkCode(code);
+                  setShowLinkCode(true);
+                } catch (error) {
+                  Alert.alert('Error', 'No se pudo generar el código');
+                }
+              }}
+            >
+              <Text style={styles.chromeOfferButtonText}>Ya tengo la extensión</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={async () => {
+                setShowChromeOffer(false);
+                await AsyncStorage.setItem('chromeOfferShown', 'true');
+              }}
+            >
+              <Text style={styles.cancelText}>Ahora no</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1334,5 +1432,44 @@ const styles = StyleSheet.create({
   },
   appBlockerStatusTextActive: {
     color: '#4CAF50',
+  },
+  // Chrome Offer Modal styles
+  chromeOfferEmoji: {
+    fontSize: 48,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  chromeOfferText: {
+    color: '#888',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  qrCode: {
+    width: 180,
+    height: 180,
+    alignSelf: 'center',
+    marginBottom: 10,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+  },
+  qrCodeLabel: {
+    color: '#666',
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  chromeOfferButton: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 10,
+    padding: 15,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  chromeOfferButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

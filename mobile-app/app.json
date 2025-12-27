@@ -17,9 +17,19 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.brickfocus.app",
       "appleTeamId": "NNS3B4399D",
+      "buildNumber": "15",
       "infoPlist": {
         "NFCReaderUsageDescription": "Brick Focus usa NFC para activar el modo focus",
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.developer.nfc.readersession.formats": [
+          "TAG"
+        ],
+        "com.apple.developer.family-controls": true,
+        "com.apple.security.application-groups": [
+          "group.com.brickfocus.app"
+        ]
       }
     },
     "android": {
@@ -27,6 +37,7 @@
         "backgroundColor": "#1a1a2e"
       },
       "package": "com.brickfocus.app",
+      "versionCode": 1,
       "permissions": [
         "android.permission.NFC"
       ]
@@ -36,7 +47,7 @@
         "expo-build-properties",
         {
           "ios": {
-            "deploymentTarget": "16.0"
+            "deploymentTarget": "17.0"
           }
         }
       ],
@@ -45,7 +56,15 @@
         {
           "nfcPermission": "Brick Focus necesita acceso a NFC para leer tu tag",
           "selectIdentifiers": [],
-          "systemCodes": []
+          "systemCodes": [],
+          "includeNdefEntitlement": false
+        }
+      ],
+      [
+        "react-native-device-activity",
+        {
+          "appleTeamId": "NNS3B4399D",
+          "appGroup": "group.com.brickfocus.app"
         }
       ]
     ],
@@ -53,6 +72,7 @@
       "eas": {
         "projectId": "e696a939-c528-4abc-98c6-9825693c90e8"
       }
-    }
+    },
+    "owner": "alangael2410"
   }
 }

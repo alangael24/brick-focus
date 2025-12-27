@@ -69,6 +69,12 @@ export const screenTimeService = {
     }
 
     try {
+      // Verificar que el método existe
+      if (typeof ReactNativeDeviceActivity.setFamilyActivitySelectionId !== 'function') {
+        console.log('setFamilyActivitySelectionId method not available');
+        return false;
+      }
+
       await ReactNativeDeviceActivity.setFamilyActivitySelectionId({
         id: SELECTION_ID,
         familyActivitySelection: familyActivitySelection,
@@ -106,50 +112,32 @@ export const screenTimeService = {
     }
 
     try {
+      // Verificar que el método existe
+      if (typeof ReactNativeDeviceActivity.updateShield !== 'function') {
+        console.log('updateShield method not available');
+        return false;
+      }
+
       // Configurar apariencia del shield
-      ReactNativeDeviceActivity.updateShield(
+      await ReactNativeDeviceActivity.updateShield(
         {
           title: 'Modo Focus Activo',
           subtitle: 'Esta app está bloqueada durante tu sesión de focus',
           primaryButtonLabel: 'OK',
-          // Colores del tema Brick Focus
-          backgroundColor: {
-            red: 26,
-            green: 26,
-            blue: 46,
-          },
-          titleColor: {
-            red: 76,
-            green: 175,
-            blue: 80,
-          },
-          subtitleColor: {
-            red: 136,
-            green: 136,
-            blue: 136,
-          },
-          primaryButtonBackgroundColor: {
-            red: 76,
-            green: 175,
-            blue: 80,
-          },
-          primaryButtonLabelColor: {
-            red: 255,
-            green: 255,
-            blue: 255,
-          },
+          backgroundColor: { red: 26, green: 26, blue: 46 },
+          titleColor: { red: 76, green: 175, blue: 80 },
+          subtitleColor: { red: 136, green: 136, blue: 136 },
+          primaryButtonBackgroundColor: { red: 76, green: 175, blue: 80 },
+          primaryButtonLabelColor: { red: 255, green: 255, blue: 255 },
         },
         {
-          primary: {
-            type: 'dismiss',
-            behavior: 'close',
-          },
+          primary: { type: 'dismiss', behavior: 'close' },
         }
       );
       console.log('Shield configured');
       return true;
     } catch (error) {
-      console.log('Error configuring shield:', error);
+      console.log('Error configuring shield:', error?.message || error);
       return false;
     }
   },
@@ -161,11 +149,15 @@ export const screenTimeService = {
     }
 
     try {
-      // Configurar shield primero
-      try {
-        await this.configureShield();
-      } catch (e) {
-        console.log('Shield config error:', e);
+      // Configurar shield primero (no fatal si falla)
+      await this.configureShield().catch(e => {
+        console.log('Shield config error (non-fatal):', e?.message || e);
+      });
+
+      // Verificar que el método existe
+      if (typeof ReactNativeDeviceActivity.blockSelection !== 'function') {
+        console.log('blockSelection method not available');
+        return false;
       }
 
       // Bloquear la selección guardada
@@ -187,6 +179,12 @@ export const screenTimeService = {
     }
 
     try {
+      // Verificar que el método existe
+      if (typeof ReactNativeDeviceActivity.unblockSelection !== 'function') {
+        console.log('unblockSelection method not available');
+        return false;
+      }
+
       await ReactNativeDeviceActivity.unblockSelection({
         familyActivitySelectionId: SELECTION_ID,
       });
@@ -206,29 +204,31 @@ export const screenTimeService = {
     }
 
     try {
-      // Configurar shield primero
-      try {
-        await this.configureShield();
-      } catch (shieldError) {
-        console.log('Shield config error (non-fatal):', shieldError?.message || shieldError);
-      }
+      // Configurar shield primero (no fatal si falla)
+      await this.configureShield().catch(e => {
+        console.log('Shield config error (non-fatal):', e?.message || e);
+      });
 
       // Detener monitoreo anterior si existe
-      try {
-        await ReactNativeDeviceActivity.stopMonitoring(ACTIVITY_NAME);
-      } catch (e) {
-        // Ignorar error si no había monitoreo activo
+      if (typeof ReactNativeDeviceActivity.stopMonitoring === 'function') {
+        try {
+          await ReactNativeDeviceActivity.stopMonitoring(ACTIVITY_NAME);
+        } catch (e) {
+          // Ignorar error si no había monitoreo activo
+        }
       }
 
       // Bloquear apps directamente (más simple y confiable)
-      try {
-        await ReactNativeDeviceActivity.blockSelection({
-          familyActivitySelectionId: SELECTION_ID,
-        });
-        console.log('Apps blocked for focus session');
-      } catch (blockError) {
-        console.log('Error blocking apps:', blockError?.message || blockError);
-        // Continuar aunque falle el bloqueo
+      if (typeof ReactNativeDeviceActivity.blockSelection === 'function') {
+        try {
+          await ReactNativeDeviceActivity.blockSelection({
+            familyActivitySelectionId: SELECTION_ID,
+          });
+          console.log('Apps blocked for focus session');
+        } catch (blockError) {
+          console.log('Error blocking apps:', blockError?.message || blockError);
+          // Continuar aunque falle el bloqueo - no es fatal
+        }
       }
 
       return true;
@@ -245,19 +245,24 @@ export const screenTimeService = {
     }
 
     try {
-      // Detener monitoreo
-      try {
-        await ReactNativeDeviceActivity.stopMonitoring(ACTIVITY_NAME);
-      } catch (e) {
-        // Ignorar si no había monitoreo
+      // Detener monitoreo si el método existe
+      if (typeof ReactNativeDeviceActivity.stopMonitoring === 'function') {
+        try {
+          await ReactNativeDeviceActivity.stopMonitoring(ACTIVITY_NAME);
+        } catch (e) {
+          // Ignorar si no había monitoreo
+        }
       }
 
       // Desbloquear apps
-      await this.unblockApps();
+      await this.unblockApps().catch(e => {
+        console.log('Error unblocking apps (non-fatal):', e?.message || e);
+      });
+
       console.log('Focus session ended');
       return true;
     } catch (error) {
-      console.log('Error ending focus session:', error);
+      console.log('Error ending focus session:', error?.message || error);
       return false;
     }
   },

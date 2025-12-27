@@ -15,7 +15,7 @@ import {
   isScreenTimeAvailable,
 } from '../services/screenTime';
 
-export default function AppBlockerScreen({ onClose, onSelectionSaved }) {
+export default function AppBlockerScreen({ onClose, onSelectionSaved, isFocusActive }) {
   const [authStatus, setAuthStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [currentSelection, setCurrentSelection] = useState(null);
@@ -42,9 +42,18 @@ export default function AppBlockerScreen({ onClose, onSelectionSaved }) {
   };
 
   const handleSelectionChange = (event) => {
-    const selection = event.nativeEvent.familyActivitySelection;
-    setCurrentSelection(selection);
-    console.log('Selection changed:', selection ? 'Has selection' : 'No selection');
+    try {
+      // El evento puede venir en diferentes formatos según la versión
+      const selection = event?.nativeEvent?.familyActivitySelection ?? event?.familyActivitySelection ?? event;
+      if (selection) {
+        setCurrentSelection(selection);
+        console.log('Selection changed:', 'Has selection');
+      } else {
+        console.log('Selection changed: No valid selection in event');
+      }
+    } catch (error) {
+      console.log('Error handling selection change:', error);
+    }
   };
 
   const handleSave = async () => {
@@ -59,9 +68,21 @@ export default function AppBlockerScreen({ onClose, onSelectionSaved }) {
       const success = await screenTimeService.saveAppSelection(currentSelection);
 
       if (success) {
+        // Si el focus está activo, bloquear las apps inmediatamente
+        if (isFocusActive) {
+          try {
+            await screenTimeService.blockApps();
+            console.log('Apps blocked immediately (focus was active)');
+          } catch (blockError) {
+            console.log('Error blocking apps immediately:', blockError);
+          }
+        }
+
         Alert.alert(
           'Apps guardadas',
-          'Las apps seleccionadas se bloquearán durante tus sesiones de focus.',
+          isFocusActive
+            ? 'Las apps seleccionadas han sido bloqueadas.'
+            : 'Las apps seleccionadas se bloquearán durante tus sesiones de focus.',
           [
             {
               text: 'OK',
@@ -186,7 +207,6 @@ export default function AppBlockerScreen({ onClose, onSelectionSaved }) {
           <DeviceActivitySelectionView
             style={styles.picker}
             onSelectionChange={handleSelectionChange}
-            familyActivitySelection={currentSelection}
           />
         )}
 

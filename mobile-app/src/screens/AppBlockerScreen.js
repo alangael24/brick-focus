@@ -44,15 +44,14 @@ export default function AppBlockerScreen({ onClose, onSelectionSaved, isFocusAct
   const handleSelectionChange = (event) => {
     try {
       // El evento puede venir en diferentes formatos según la versión
-      const selection = event?.nativeEvent?.familyActivitySelection ?? event?.familyActivitySelection ?? event;
-      if (selection) {
-        setCurrentSelection(selection);
-        console.log('Selection changed:', 'Has selection');
-      } else {
-        console.log('Selection changed: No valid selection in event');
-      }
+      const selection = event?.nativeEvent?.familyActivitySelection ?? event?.familyActivitySelection ?? null;
+
+      // Siempre actualizar la selección (incluyendo null cuando se deselecciona todo)
+      setCurrentSelection(selection);
+      console.log('Selection changed:', selection ? 'Has selection' : 'No selection (cleared)');
     } catch (error) {
       console.log('Error handling selection change:', error);
+      setCurrentSelection(null);
     }
   };
 

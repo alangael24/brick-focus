@@ -8,18 +8,60 @@ try {
   console.log('react-native-device-activity not available');
 }
 
-// Constantes para identificar selecciones y actividades
+// Constantes
 const SELECTION_ID = 'brick_focus_blocked_apps';
 const ACTIVITY_NAME = 'brick_focus_session';
-const SHIELD_ID = 'brick_focus_shield';
 
-// Verificar si Screen Time está disponible (solo iOS y módulo instalado)
+// Límite de Apple para apps bloqueadas (documentado en Screen Time API)
+const MAX_BLOCKED_APPS = 50;
+
+// Verificar si Screen Time está disponible (solo iOS 15+ y módulo instalado)
 export const isScreenTimeAvailable = () => {
-  return Platform.OS === 'ios' && ReactNativeDeviceActivity !== null;
+  if (Platform.OS !== 'ios' || ReactNativeDeviceActivity === null) return false;
+
+  // Preferir el check del SDK si existe
+  if (typeof ReactNativeDeviceActivity.isAvailable === 'function') {
+    try {
+      return !!ReactNativeDeviceActivity.isAvailable();
+    } catch (e) {
+      return false;
+    }
+  }
+
+  const version = parseInt(String(Platform.Version ?? '0'), 10);
+  return version >= 15;
+};
+
+// Helper para obtener metadata de una selección
+const getSelectionMetadata = (selectionId) => {
+  if (typeof ReactNativeDeviceActivity?.activitySelectionMetadata !== 'function') {
+    return null;
+  }
+  try {
+    return ReactNativeDeviceActivity.activitySelectionMetadata({ activitySelectionId: selectionId });
+  } catch (e) {
+    console.log('Error getting selection metadata:', e?.message || e);
+    return null;
+  }
+};
+
+// Helper para validar que no exceda el límite de 50 apps
+const validateSelectionLimit = (metadata) => {
+  if (!metadata) return { valid: true, count: 0 }; // Si no hay metadata, permitir
+
+  const appCount = metadata.applicationCount ?? 0;
+  const categoryCount = metadata.categoryCount ?? 0;
+  const totalCount = appCount + categoryCount;
+
+  return {
+    valid: totalCount <= MAX_BLOCKED_APPS,
+    count: totalCount,
+    appCount,
+    categoryCount,
+  };
 };
 
 export const screenTimeService = {
-  // Estado de autorización
   authorizationStatus: null,
 
   // Solicitar autorización de Screen Time
@@ -30,10 +72,19 @@ export const screenTimeService = {
     }
 
     try {
-      const status = await ReactNativeDeviceActivity.requestAuthorization();
+      await ReactNativeDeviceActivity.requestAuthorization();
+
+      const status =
+        typeof ReactNativeDeviceActivity.pollAuthorizationStatus === 'function'
+          ? await ReactNativeDeviceActivity.pollAuthorizationStatus({ maxAttempts: 10, pollIntervalMs: 250 })
+          : await this.getAuthorizationStatus();
+
       this.authorizationStatus = status;
       console.log('Screen Time authorization status:', status);
-      return status;
+
+      if (status === 2 || status === 'approved') return 'authorized';
+      if (status === 1 || status === 'denied') return 'denied';
+      return 'notDetermined';
     } catch (error) {
       console.log('Error requesting Screen Time authorization:', error);
       return 'error';
@@ -47,11 +98,21 @@ export const screenTimeService = {
     }
 
     try {
-      const status = await ReactNativeDeviceActivity.getAuthorizationStatus();
+      if (typeof ReactNativeDeviceActivity.getAuthorizationStatus !== 'function') {
+        console.log('getAuthorizationStatus method not available');
+        return 'error';
+      }
+
+      const status = ReactNativeDeviceActivity.getAuthorizationStatus();
       this.authorizationStatus = status;
+
+      if (status === undefined || status === null) {
+        return 'notDetermined';
+      }
+
       return status;
     } catch (error) {
-      console.log('Error getting authorization status:', error);
+      console.log('Error getting authorization status:', error?.message || error);
       return 'error';
     }
   },
@@ -69,16 +130,29 @@ export const screenTimeService = {
     }
 
     try {
-      // Verificar que el método existe
       if (typeof ReactNativeDeviceActivity.setFamilyActivitySelectionId !== 'function') {
         console.log('setFamilyActivitySelectionId method not available');
         return false;
       }
 
+      // Guardar la selección
       await ReactNativeDeviceActivity.setFamilyActivitySelectionId({
         id: SELECTION_ID,
         familyActivitySelection: familyActivitySelection,
       });
+
+      // Validar el límite de 50 apps DESPUÉS de guardar (porque necesitamos el metadata)
+      const metadata = getSelectionMetadata(SELECTION_ID);
+      if (metadata) {
+        const validation = validateSelectionLimit(metadata);
+        console.log(`Selection saved: ${validation.appCount} apps, ${validation.categoryCount} categories`);
+
+        if (!validation.valid) {
+          console.warn(`Warning: Selection exceeds ${MAX_BLOCKED_APPS} items (${validation.count}). This may cause crashes.`);
+          // No fallamos, solo advertimos - el usuario puede querer usar categorías
+        }
+      }
+
       console.log('App selection saved with ID:', SELECTION_ID);
       return true;
     } catch (error) {
@@ -94,14 +168,29 @@ export const screenTimeService = {
     }
 
     try {
-      // La selección se guarda en UserDefaults con el ID
-      const selection = await ReactNativeDeviceActivity.userDefaultsGet(
-        `familyActivitySelection_${SELECTION_ID}`
-      );
-      return selection;
+      const selectionIds = ReactNativeDeviceActivity.userDefaultsGet?.('familyActivitySelectionIds');
+      return selectionIds?.[SELECTION_ID] ?? null;
     } catch (error) {
       console.log('Error getting saved selection:', error);
       return null;
+    }
+  },
+
+  // Limpiar bloqueos existentes de forma segura
+  async clearExistingBlocks() {
+    if (typeof ReactNativeDeviceActivity?.resetBlocks !== 'function') {
+      console.log('resetBlocks not available, skipping cleanup');
+      return true; // No es un error crítico
+    }
+
+    try {
+      ReactNativeDeviceActivity.resetBlocks('cleanup');
+      console.log('Existing blocks cleared');
+      return true;
+    } catch (error) {
+      console.log('Error clearing blocks:', error?.message || error);
+      // Continuar de todos modos - el bloqueo nuevo debería funcionar
+      return true;
     }
   },
 
@@ -112,13 +201,11 @@ export const screenTimeService = {
     }
 
     try {
-      // Verificar que el método existe
       if (typeof ReactNativeDeviceActivity.updateShield !== 'function') {
         console.log('updateShield method not available');
         return false;
       }
 
-      // Configurar apariencia del shield
       await ReactNativeDeviceActivity.updateShield(
         {
           title: 'Modo Focus Activo',
@@ -142,30 +229,53 @@ export const screenTimeService = {
     }
   },
 
-  // Bloquear apps seleccionadas (activar bloqueo inmediatamente)
+  // Bloquear apps seleccionadas
   async blockApps() {
     if (!isScreenTimeAvailable()) {
       return false;
     }
 
     try {
-      // Configurar shield primero (no fatal si falla)
-      await this.configureShield().catch(e => {
-        console.log('Shield config error (non-fatal):', e?.message || e);
-      });
-
-      // Verificar que el método existe
+      // Verificar que blockSelection existe
       if (typeof ReactNativeDeviceActivity.blockSelection !== 'function') {
         console.log('blockSelection method not available');
         return false;
       }
 
-      // Bloquear la selección guardada
-      await ReactNativeDeviceActivity.blockSelection({
-        familyActivitySelectionId: SELECTION_ID,
+      // Validar que hay una selección guardada
+      const metadata = getSelectionMetadata(SELECTION_ID);
+      if (!metadata) {
+        console.log('No saved selection found, cannot block');
+        return false;
+      }
+
+      const validation = validateSelectionLimit(metadata);
+      if (validation.count === 0) {
+        console.log('Selection is empty, nothing to block');
+        return false;
+      }
+
+      if (!validation.valid) {
+        console.warn(`Warning: Blocking ${validation.count} items (exceeds ${MAX_BLOCKED_APPS} limit)`);
+      }
+
+      // Limpiar bloqueos anteriores primero
+      await this.clearExistingBlocks();
+
+      // Configurar shield (no es crítico si falla)
+      await this.configureShield().catch(e => {
+        console.log('Shield config warning:', e?.message || e);
       });
-      console.log('Apps blocked');
-      return true;
+
+      // Bloquear apps - ENVUELTO EN TRY-CATCH
+      try {
+        ReactNativeDeviceActivity.blockSelection({ activitySelectionId: SELECTION_ID });
+        console.log('Apps blocked successfully');
+        return true;
+      } catch (blockError) {
+        console.log('Error in blockSelection:', blockError?.message || blockError);
+        return false;
+      }
     } catch (error) {
       console.log('Error blocking apps:', error?.message || error);
       return false;
@@ -179,24 +289,25 @@ export const screenTimeService = {
     }
 
     try {
-      // Verificar que el método existe
-      if (typeof ReactNativeDeviceActivity.unblockSelection !== 'function') {
-        console.log('unblockSelection method not available');
+      if (typeof ReactNativeDeviceActivity.resetBlocks === 'function') {
+        ReactNativeDeviceActivity.resetBlocks('unblock');
+        console.log('Apps unblocked via resetBlocks');
+        return true;
+      } else if (typeof ReactNativeDeviceActivity.unblockSelection === 'function') {
+        ReactNativeDeviceActivity.unblockSelection({ activitySelectionId: SELECTION_ID });
+        console.log('Apps unblocked via unblockSelection');
+        return true;
+      } else {
+        console.log('No unblock method available');
         return false;
       }
-
-      await ReactNativeDeviceActivity.unblockSelection({
-        familyActivitySelectionId: SELECTION_ID,
-      });
-      console.log('Apps unblocked');
-      return true;
     } catch (error) {
       console.log('Error unblocking apps:', error?.message || error);
       return false;
     }
   },
 
-  // Iniciar sesión de focus con bloqueo programado
+  // Iniciar sesión de focus con bloqueo
   async startFocusSession(durationSeconds = null) {
     if (!isScreenTimeAvailable()) {
       console.log('Screen Time not available for focus session');
@@ -204,33 +315,32 @@ export const screenTimeService = {
     }
 
     try {
-      // Configurar shield primero (no fatal si falla)
-      await this.configureShield().catch(e => {
-        console.log('Shield config error (non-fatal):', e?.message || e);
-      });
+      // Verificar autorización
+      const authStatus = await this.getAuthorizationStatus();
+      const isAuthorized = authStatus === 'approved' || authStatus === 2;
 
-      // Detener monitoreo anterior si existe
-      if (typeof ReactNativeDeviceActivity.stopMonitoring === 'function') {
-        try {
-          await ReactNativeDeviceActivity.stopMonitoring(ACTIVITY_NAME);
-        } catch (e) {
-          // Ignorar error si no había monitoreo activo
-        }
+      if (!isAuthorized) {
+        console.log('Screen Time not authorized, status:', authStatus);
+        return false;
       }
 
-      // Bloquear apps directamente (más simple y confiable)
-      if (typeof ReactNativeDeviceActivity.blockSelection === 'function') {
-        try {
-          await ReactNativeDeviceActivity.blockSelection({
-            familyActivitySelectionId: SELECTION_ID,
-          });
-          console.log('Apps blocked for focus session');
-        } catch (blockError) {
-          console.log('Error blocking apps:', blockError?.message || blockError);
-          // Continuar aunque falle el bloqueo - no es fatal
-        }
+      // Verificar que hay apps seleccionadas
+      const metadata = getSelectionMetadata(SELECTION_ID);
+      if (!metadata || (metadata.applicationCount === 0 && metadata.categoryCount === 0)) {
+        console.log('No apps selected to block');
+        return false;
       }
 
+      console.log(`Starting focus session: ${metadata.applicationCount} apps, ${metadata.categoryCount} categories`);
+
+      // Bloquear usando el método dedicado
+      const blocked = await this.blockApps();
+      if (!blocked) {
+        console.log('Failed to block apps');
+        return false;
+      }
+
+      console.log('Focus session started with app blocking');
       return true;
     } catch (error) {
       console.log('Error starting focus session:', error?.message || error);
@@ -245,21 +355,18 @@ export const screenTimeService = {
     }
 
     try {
-      // Detener monitoreo si el método existe
+      // Detener monitoreo si existe
       if (typeof ReactNativeDeviceActivity.stopMonitoring === 'function') {
         try {
           await ReactNativeDeviceActivity.stopMonitoring(ACTIVITY_NAME);
         } catch (e) {
-          // Ignorar si no había monitoreo
+          // Ignorar - puede que no hubiera monitoreo activo
         }
       }
 
       // Desbloquear apps
-      await this.unblockApps().catch(e => {
-        console.log('Error unblocking apps (non-fatal):', e?.message || e);
-      });
-
-      console.log('Focus session ended');
+      const unblocked = await this.unblockApps();
+      console.log('Focus session ended, unblock result:', unblocked);
       return true;
     } catch (error) {
       console.log('Error ending focus session:', error?.message || error);
@@ -267,13 +374,13 @@ export const screenTimeService = {
     }
   },
 
-  // Escuchar eventos de Device Activity (cuando la app está activa)
+  // Escuchar eventos de Device Activity
   onDeviceActivityEvent(callback) {
     if (!isScreenTimeAvailable()) {
       return null;
     }
 
-    return ReactNativeDeviceActivity.onDeviceActivityMonitorEvent((event) => {
+    return ReactNativeDeviceActivity.onDeviceActivityMonitorEvent?.((event) => {
       console.log('Device Activity Event:', event.nativeEvent);
       callback(event.nativeEvent);
     });
@@ -286,7 +393,7 @@ export const screenTimeService = {
     }
 
     try {
-      const events = await ReactNativeDeviceActivity.getEvents();
+      const events = await ReactNativeDeviceActivity.getEvents?.();
       return events || [];
     } catch (error) {
       console.log('Error getting events:', error);
@@ -294,14 +401,14 @@ export const screenTimeService = {
     }
   },
 
-  // Revocar autorización (para debug/testing)
+  // Revocar autorización (para testing)
   async revokeAuthorization() {
     if (!isScreenTimeAvailable()) {
       return false;
     }
 
     try {
-      await ReactNativeDeviceActivity.revokeAuthorization();
+      await ReactNativeDeviceActivity.revokeAuthorization?.();
       this.authorizationStatus = null;
       return true;
     } catch (error) {

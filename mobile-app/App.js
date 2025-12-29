@@ -75,10 +75,15 @@ export default function App() {
   // Manejar autenticación
   useEffect(() => {
     // Obtener sesión actual
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoadingAuth(false);
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        setLoadingAuth(false);
+      })
+      .catch((error) => {
+        console.log('Error getting session:', error);
+        setLoadingAuth(false);
+      });
 
     // Escuchar cambios de auth
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -198,7 +203,11 @@ function MainApp({ session }) {
         }
 
         // Suscribirse a cambios en tiempo real
-        const userId = session.user.id;
+        const userId = session?.user?.id;
+        if (!userId) {
+          console.log('No user ID available');
+          return;
+        }
         subscriptionRef.current = brickStatusService.subscribeToChanges((newStatus) => {
           console.log('Realtime:', newStatus.is_locked ? 'LOCKED' : 'UNLOCKED');
           setIsLocked(newStatus.is_locked);
@@ -241,7 +250,8 @@ function MainApp({ session }) {
         // Inicializar Screen Time (solo iOS)
         if (isScreenTimeAvailable()) {
           const authStatus = await screenTimeService.getAuthorizationStatus();
-          setScreenTimeEnabled(authStatus === 'approved' || authStatus === 'authorized');
+          // El status puede ser string ('approved') o número (2 = approved)
+          setScreenTimeEnabled(authStatus === 'approved' || authStatus === 'authorized' || authStatus === 2);
         }
       } catch (error) {
         console.log('Error conectando a Supabase:', error);
@@ -266,17 +276,23 @@ function MainApp({ session }) {
 
   // Timer del focus - usar ref para el interval
   const timerIntervalRef = useRef(null);
+  const timerEndTimeRef = useRef(null);
+
+  // Mantener ref sincronizado con state
+  useEffect(() => {
+    timerEndTimeRef.current = timerEndTime;
+  }, [timerEndTime]);
 
   const startTimer = () => {
     // Limpiar interval anterior si existe
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
     }
-    // Iniciar inmediatamente
+    // Iniciar inmediatamente - usar ref para evitar stale closure
     timerIntervalRef.current = setInterval(() => {
-      if (timerEndTime) {
+      if (timerEndTimeRef.current) {
         // Modo countdown
-        const remaining = timerEndTime - Date.now();
+        const remaining = timerEndTimeRef.current - Date.now();
         if (remaining <= 0) {
           // Timer terminado - auto desactivar
           handleTimerComplete();
@@ -316,7 +332,7 @@ function MainApp({ session }) {
 
     // Finalizar sesión de analytics
     await analyticsService.endSession(true);
-    loadStats();
+    await loadStats();
 
     // Desactivar Screen Time (el schedule debería manejarlo, pero por seguridad)
     if (isScreenTimeAvailable() && screenTimeEnabled) {
@@ -479,7 +495,10 @@ function MainApp({ session }) {
       // Solo si Supabase confirmó, actualizar UI y analytics
       setSelectedDuration(duration);
       setIsLocked(true);
-      focusStartTime.current = Date.now();
+      // Usar timestamp del servidor para sincronización precisa
+      focusStartTime.current = newStatus.last_updated
+        ? new Date(newStatus.last_updated).getTime()
+        : Date.now();
 
       if (duration) {
         // Modo countdown - usar tiempo de Supabase para sincronización
@@ -502,10 +521,21 @@ function MainApp({ session }) {
       // Activar bloqueo de apps con Screen Time (iOS)
       if (isScreenTimeAvailable() && screenTimeEnabled) {
         try {
-          await screenTimeService.startFocusSession(duration);
-          console.log('Screen Time blocking activated');
+          // Verificar autorización antes de intentar bloquear
+          const authStatus = await screenTimeService.getAuthorizationStatus();
+          console.log('Screen Time auth status before blocking:', authStatus);
+
+          // El status puede ser string ('approved') o número (2 = approved)
+          const isAuthorized = authStatus === 'approved' || authStatus === 'authorized' || authStatus === 2;
+          if (isAuthorized) {
+            const result = await screenTimeService.startFocusSession(duration);
+            console.log('Screen Time blocking result:', result);
+          } else {
+            console.log('Screen Time not authorized, skipping app blocking. Status:', authStatus);
+          }
         } catch (screenTimeError) {
-          console.log('Screen Time error (non-fatal):', screenTimeError);
+          console.log('Screen Time error (non-fatal):', screenTimeError?.message || screenTimeError);
+          // No crashear la app si Screen Time falla
         }
       }
     } catch (error) {
@@ -537,7 +567,7 @@ function MainApp({ session }) {
       focusStartTime.current = null;
 
       await analyticsService.endSession(true);
-      loadStats();
+      await loadStats();
 
       // Desactivar bloqueo de apps con Screen Time (iOS)
       if (isScreenTimeAvailable() && screenTimeEnabled) {
@@ -668,10 +698,12 @@ function MainApp({ session }) {
               <TouchableOpacity
                 style={styles.customButton}
                 onPress={() => {
-                  const mins = parseInt(customMinutes);
-                  if (mins > 0) {
+                  const mins = parseInt(customMinutes, 10);
+                  if (!isNaN(mins) && mins > 0 && mins <= 480) {
                     startFocusWithDuration(mins * 60);
                     setCustomMinutes('');
+                  } else if (mins > 480) {
+                    Alert.alert('Error', 'El máximo es 8 horas (480 minutos)');
                   }
                 }}
               >
@@ -889,7 +921,7 @@ function MainApp({ session }) {
         {/* Info */}
         <View style={styles.infoContainer}>
           <Text style={styles.infoText}>
-            {session.user.email}
+            {session?.user?.email || 'Usuario'}
           </Text>
           <Text style={styles.infoText}>
             {!NfcManager

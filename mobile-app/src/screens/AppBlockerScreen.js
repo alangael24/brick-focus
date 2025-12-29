@@ -202,6 +202,8 @@ export default function AppBlockerScreen({ onClose, onSelectionSaved, isFocusAct
 
       <Text style={styles.instructions}>
         Selecciona las apps que quieres bloquear durante tus sesiones de focus.
+        {'\n'}
+        <Text style={styles.instructionsTip}>Tip: Usa categorías en lugar de apps individuales para evitar problemas.</Text>
       </Text>
 
       {/* Contenedor del picker de apps */}
@@ -285,6 +287,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     padding: 15,
     lineHeight: 20,
+  },
+  instructionsTip: {
+    color: '#FFA500',
+    fontSize: 12,
+    fontStyle: 'italic',
   },
   pickerContainer: {
     flex: 1,

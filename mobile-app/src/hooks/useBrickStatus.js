@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { brickStatusService } from '../services/brickStatus';
+import { supabase } from '../lib/supabase';
 
 export function useBrickStatus() {
   const [isLocked, setIsLocked] = useState(false);
@@ -12,16 +13,22 @@ export function useBrickStatus() {
 
     const init = async () => {
       try {
+        // Obtener userId de la sesión
+        const { data: { session } } = await supabase.auth.getSession();
+        const userId = session?.user?.id;
+
         // Obtener estado inicial
         const status = await brickStatusService.getStatus();
         setIsLocked(status.is_locked);
         setLoading(false);
 
-        // Suscribirse a cambios en tiempo real
-        subscription = brickStatusService.subscribeToChanges((newStatus) => {
-          console.log('Realtime update:', newStatus);
-          setIsLocked(newStatus.is_locked);
-        });
+        // Suscribirse a cambios en tiempo real (requiere userId)
+        if (userId) {
+          subscription = brickStatusService.subscribeToChanges((newStatus) => {
+            console.log('Realtime update:', newStatus);
+            setIsLocked(newStatus.is_locked);
+          }, userId);
+        }
       } catch (err) {
         console.log('Error inicializando brick status:', err);
         setError(err);
